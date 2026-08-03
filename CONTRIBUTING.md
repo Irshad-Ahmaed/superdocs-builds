@@ -9,17 +9,18 @@ Thanks for building on SuperDocs. This repo is intentionally simple: one builder
    - `use-cases/<your-github-username>/<project-name>/` for apps and use cases
    - `extensions/<your-github-username>/<project-name>/` for extensions, integrations and developer tools
 3. Build inside your folder only. Do not modify anything outside it.
-4. Open one pull request per project.
+4. Open a pull request.
 
-More than one project? Add more project folders under your username and open a separate pull request for each. Several people building similar things is fine here; every take on an idea is welcome.
+More than one project? Add more project folders under your username. One pull request per project is the default; one pull request covering everything you built for a SuperDocs hiring round is equally fine. Several people building similar things is fine here; every take on an idea is welcome.
 
 ## Your pull request description must include
 
 - **Your name** (the one you want publicly credited)
-- **A contact email** (use the same email you use with SuperDocs, so we can connect your work to you)
 - One or two sentences on what the project does
 
-We read every pull request. Work that cannot be traced to its builder cannot be credited, so the name and email matter.
+Do not put your email address in the pull request. This is a public repository and public email addresses get scraped. Your GitHub handle already rides the pull request itself; if you are submitting as part of a SuperDocs hiring round, the round's submission form collects your email and GitHub handle, and that is how we connect your work to you.
+
+We read every pull request. Work that cannot be traced to its builder cannot be credited, so the name matters.
 
 ## Every project needs its own README
 
