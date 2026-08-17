@@ -38,6 +38,12 @@ def _build_change_bars_instruction(positions: list[int], total: int) -> str:
 
 def _build_record_table_instruction(metadata: RevisionMetadata) -> str:
     """Build a chat instruction to insert a revision-record table."""
+    if not metadata.changes:
+        return (
+            f"Insert a revision-record table at the top of the document with these columns: "
+            f"Revision Number, Date, Summary of Change.\n"
+            f"Row: | {metadata.revision_number} | {metadata.date} | No content changes |"
+        )
     change_rows = "\n".join(
         f"| {i + 1} | {c} |" for i, c in enumerate(metadata.changes)
     )

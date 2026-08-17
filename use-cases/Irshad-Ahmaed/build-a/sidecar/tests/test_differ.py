@@ -75,3 +75,29 @@ def test_from_chunk_diffs() -> None:
     result = differ.from_chunk_diffs(chunk_diffs)
     assert result.has_changes
     assert len(result.changed) == 2
+
+
+def test_from_chunk_diffs_all_unchanged() -> None:
+    chunk_diffs = [
+        {"chunk_id": "c1", "old_text": "Hello", "new_text": "Hello"},
+        {"chunk_id": "c2", "old_text": "World", "new_text": "World"},
+    ]
+    differ = DocDiffer()
+    result = differ.from_chunk_diffs(chunk_diffs)
+    assert not result.has_changes
+
+
+def test_empty_html_both_sides() -> None:
+    differ = DocDiffer()
+    result = differ.diff("", "")
+    assert not result.has_changes
+    assert result.total_paragraphs_old == 0
+    assert result.total_paragraphs_new == 0
+
+
+def test_formatting_only_changes() -> None:
+    pre = '<html><body><p class="old">Hello world</p></body></html>'
+    post = '<html><body><p class="new">Hello world</p></body></html>'
+    differ = DocDiffer()
+    result = differ.diff(pre, post)
+    assert not result.has_changes  # text is identical

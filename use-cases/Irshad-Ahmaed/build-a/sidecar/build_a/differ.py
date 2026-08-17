@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from enum import StrEnum
 
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 
 
 class ChangeType(StrEnum):
@@ -62,10 +62,9 @@ def extract_paragraphs(html: str) -> list[tuple[str, str | None]]:
         if not text:
             continue
         chunk_id: str | None = None
-        if isinstance(el, Tag):
-            data_chunk = el.get("data-chunk-id") or el.get("data-chunk")
-            if data_chunk:
-                chunk_id = str(data_chunk)
+        data_chunk = el.get("data-chunk-id") or el.get("data-chunk")
+        if data_chunk:
+            chunk_id = str(data_chunk)
         results.append((text, chunk_id))
 
     return results
@@ -97,6 +96,8 @@ def diff_paragraphs(
     new_paras: list[tuple[str, str | None]],
 ) -> list[ParagraphDiff]:
     """Diff two lists of (text, chunk_id) pairs using sequence matching."""
+    if not old_paras and not new_paras:
+        return []
     old_texts = [p[0] for p in old_paras]
     new_texts = [p[0] for p in new_paras]
     old_chunks = [p[1] for p in old_paras]

@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .client import SuperDocsClient
+from .client import SuperDocsClient, SuperDocsError
 
 
 @dataclass
@@ -38,21 +38,21 @@ async def export_pdf(client: SuperDocsClient, session_id: str, output_path: Path
 
     Tries direct export first, falls back to pre-signed URL for large files.
     """
+    import httpx
+
     try:
         result = await client.export(session_id=session_id, format="pdf")
         if result.download_url:
-            import httpx
             async with httpx.AsyncClient() as http:
                 pdf_resp = await http.get(result.download_url)
                 pdf_resp.raise_for_status()
                 output_path.write_bytes(pdf_resp.content)
                 return output_path
-    except Exception:
+    except SuperDocsError:
         pass
 
     # Fallback: pre-signed download URL
     dl = await client.request_download(session_id, format="pdf")
-    import httpx
     async with httpx.AsyncClient() as http:
         pdf_resp = await http.get(dl.download_url)
         pdf_resp.raise_for_status()
@@ -102,7 +102,7 @@ def verify_pdf(
     for page in doc:
         full_text += page.get_text()
 
-    has_table = "revision" in full_text.lower() or "date" in full_text.lower()
+    has_table = "revision number" in full_text.lower() or "revision record" in full_text.lower()
     report.checks.append(VerificationCheck(
         name="Revision-record table",
         passed=has_table,
@@ -118,8 +118,8 @@ def verify_pdf(
             details=f"Expected '{expected_revision}' {'found' if has_revision else 'NOT found'}",
         ))
 
-    # Check: change bars present (vertical bar characters or unicode markers)
-    bar_pattern = re.compile(r"[│┃|\u2502\u2503]")
+    # Check: change bars present (unicode box-drawing characters used as revision marks)
+    bar_pattern = re.compile(r"[\u2502\u2503\u2504\u2505\u2506\u2507\u2508\u2509\u250a\u250b]")
     bar_count = len(bar_pattern.findall(full_text))
     report.checks.append(VerificationCheck(
         name="Change bars present",

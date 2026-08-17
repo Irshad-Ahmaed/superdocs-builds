@@ -75,3 +75,47 @@ def test_no_changes_generates_only_record() -> None:
     batches = apparatus.generate(diff, metadata)
 
     assert len(batches) == 1  # Only record + highlights, no change bars
+
+
+def test_empty_changes_list() -> None:
+    diff = DiffResult(changed=[], total_paragraphs_old=5, total_paragraphs_new=5)
+    metadata = RevisionMetadata(
+        revision_number="0042",
+        date="2025-01-15",
+        changes=[],
+    )
+    apparatus = RevisionApparatus()
+    batches = apparatus.generate(diff, metadata)
+
+    assert len(batches) == 1
+    combined = batches[0].combined
+    assert "0042" in combined
+    assert "No content changes" in combined
+
+
+def test_exact_25_sections_no_chunking() -> None:
+    diff = _make_diff(25)
+    metadata = RevisionMetadata(
+        revision_number="0042",
+        date="2025-01-15",
+        changes=[f"Change {i}" for i in range(25)],
+    )
+    apparatus = RevisionApparatus()
+    batches = apparatus.generate(diff, metadata)
+
+    # 1 (record+highlights) + 1 (25 bars) = 2 batches
+    assert len(batches) == 2
+
+
+def test_26_sections_chunks_into_two() -> None:
+    diff = _make_diff(26)
+    metadata = RevisionMetadata(
+        revision_number="0042",
+        date="2025-01-15",
+        changes=[f"Change {i}" for i in range(26)],
+    )
+    apparatus = RevisionApparatus()
+    batches = apparatus.generate(diff, metadata)
+
+    # 1 (record+highlights) + 2 (25+1 bars) = 3 batches
+    assert len(batches) == 3

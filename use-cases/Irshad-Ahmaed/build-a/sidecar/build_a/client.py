@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
-import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -28,7 +28,7 @@ class RateLimitError(SuperDocsError):
     """Rate limit hit — caller should retry after backoff."""
 
 
-class TimeoutError(SuperDocsError):
+class SuperDocsTimeoutError(SuperDocsError):
     """Request timed out."""
 
 
@@ -140,6 +140,12 @@ class SuperDocsClient:
     async def close(self) -> None:
         await self._client.aclose()
 
+    async def __aenter__(self) -> SuperDocsClient:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self.close()
+
     # --- Core 4-call contract ---
 
     async def start_session(
@@ -182,7 +188,7 @@ class SuperDocsClient:
         payload = {"chunk_id": chunk_id, "approved": approved}
         if feedback:
             payload["feedback"] = feedback
-        resp = await self._post_json(f"/v1/chat/{session_id}/approve", payload)
+        resp = await self._post(f"/v1/chat/{session_id}/approve", payload)
         self.tracker.record("approve", 0, f"chunk={chunk_id} approved={approved}")
         return resp
 
@@ -233,7 +239,7 @@ class SuperDocsClient:
     async def continue_prompt(self, session_id: str, should_continue: bool) -> dict[str, Any]:
         """Resume or stop a large edit (0 ops)."""
         payload = {"should_continue": should_continue}
-        resp = await self._post_json(f"/v1/chat/{session_id}/continue", payload)
+        resp = await self._post(f"/v1/chat/{session_id}/continue", payload)
         self.tracker.record("continue_prompt", 0, f"continue={should_continue}")
         return resp
 
@@ -246,7 +252,7 @@ class SuperDocsClient:
 
     async def save_document(self, session_id: str, document_id: str) -> dict[str, Any]:
         """Persist a human-edited document (0 ops)."""
-        resp = await self._post_json(
+        resp = await self._post(
             f"/v1/sessions/{session_id}/documents/{document_id}/save", {}
         )
         self.tracker.record("save_document", 0, f"session={session_id} doc={document_id}")
@@ -254,7 +260,7 @@ class SuperDocsClient:
 
     async def signup(self) -> dict[str, Any]:
         """Agent self-signup — returns a working API key with 500-op free tier (0 ops)."""
-        resp = await self._post_json("/v1/agents/signup", {})
+        resp = await self._post("/v1/agents/signup", {})
         self.tracker.record("signup", 0)
         return resp
 
@@ -284,13 +290,13 @@ class SuperDocsClient:
 
     async def request_upload(self) -> UploadResponse:
         """Get a pre-signed upload URL (0 ops)."""
-        resp = await self._post_json("/v1/uploads", {})
+        resp = await self._post("/v1/uploads", {})
         self.tracker.record("request_upload", 0)
         return UploadResponse.model_validate(resp)
 
     async def process_upload(self, upload_id: str) -> dict[str, Any]:
         """Parse an uploaded file into structured HTML (0 ops)."""
-        resp = await self._post_json(f"/v1/uploads/{upload_id}/process", {})
+        resp = await self._post(f"/v1/uploads/{upload_id}/process", {})
         self.tracker.record("process_upload", 0, f"upload={upload_id}")
         return resp
 
@@ -336,9 +342,6 @@ class SuperDocsClient:
     async def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._request_with_retry("POST", path, json=payload)
 
-    async def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return await self._request_with_retry("POST", path, json=payload)
-
     async def _get(
         self, path: str, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:
@@ -365,13 +368,13 @@ class SuperDocsClient:
                     logger.warning(
                         "Rate limited, retrying in %.1fs (attempt %d)", wait, attempt + 1
                     )
-                    time.sleep(wait)
+                    await asyncio.sleep(wait)
                     last_exc = RateLimitError(f"Rate limited after {max_retries} retries")
                     continue
                 resp.raise_for_status()
                 return resp.json()
             except httpx.TimeoutException as exc:
-                last_exc = TimeoutError(f"Request timed out: {exc}")
+                last_exc = SuperDocsTimeoutError(f"Request timed out: {exc}")
                 logger.warning("Timeout on %s %s (attempt %d)", method, path, attempt + 1)
                 continue
             except httpx.HTTPStatusError as exc:
