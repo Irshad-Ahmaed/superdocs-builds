@@ -51,7 +51,7 @@ def verify_pdf(
             details="pymupdf not installed — pip install pymupdf",
         ))
         return report
-    except Exception as e:
+    except OSError as e:
         report.checks.append(VerificationCheck(
             name="PDF parse",
             passed=False,

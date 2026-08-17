@@ -375,6 +375,8 @@ class SuperDocsClient:
                     continue
                 resp.raise_for_status()
                 return resp.json()
+            except AuthError:
+                raise
             except httpx.TimeoutException as exc:
                 last_exc = SuperDocsTimeoutError(f"Request timed out: {exc}")
                 logger.warning("Timeout on %s %s (attempt %d)", method, path, attempt + 1)

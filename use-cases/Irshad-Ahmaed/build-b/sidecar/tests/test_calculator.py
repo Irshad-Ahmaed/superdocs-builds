@@ -64,6 +64,12 @@ def test_payback_computed_for_paid_tier() -> None:
     assert results.payback_months > 0
 
 
+def test_horizon_zero_raises() -> None:
+    """horizon_years=0 should raise ValueError."""
+    with pytest.raises(ValueError, match="horizon_years"):
+        compute_tco(CalculatorInputs(volume=100, hours=100, hourly_cost=50, horizon_years=0))
+
+
 def test_report_prompt_contains_exact_values() -> None:
     """Report prompt contains exact computed values — key invariant."""
     inputs = CalculatorInputs(volume=100, hours=500, hourly_cost=75)

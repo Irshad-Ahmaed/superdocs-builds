@@ -45,9 +45,10 @@ class DiffResult:
 
     def to_instruction_payload(self) -> str:
         """Format diff for injection into a chat instruction."""
+        tag_map = {"modified": "~", "added": "+", "removed": "-"}
         lines = []
         for d in self.changed:
-            tag = {"modified": "~", "added": "+", "removed": "-"}[d.change_type.value]
+            tag = tag_map.get(d.change_type.value, "?")
             lines.append(f"[{tag}] Paragraph {d.position}: {d.new_text[:200]}")
         return "\n".join(lines)
 
@@ -124,13 +125,12 @@ def diff_paragraphs(
                 pos = i1 + k if i1 + k < i2 else j1 + (k - (i2 - i1))
                 old_text = old_texts[i1 + k] if i1 + k < i2 else ""
                 new_text = new_texts[j1 + k] if j1 + k < j2 else ""
-                chunk_id = (
-                    new_chunks[j1 + k]
-                    if j1 + k < j2
-                    else old_chunks[i1 + k]
-                    if i1 + k < i2
-                    else None
-                )
+                if j1 + k < j2:
+                    chunk_id = new_chunks[j1 + k]
+                elif i1 + k < i2:
+                    chunk_id = old_chunks[i1 + k]
+                else:
+                    chunk_id = None
                 diffs.append(ParagraphDiff(
                     position=pos,
                     change_type=ChangeType.MODIFIED,

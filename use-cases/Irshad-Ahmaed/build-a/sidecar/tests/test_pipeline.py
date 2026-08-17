@@ -22,24 +22,47 @@ EDITED_HTML = """<html><body>
 </body></html>"""
 
 
-def _setup_mocks() -> None:
-    """Configure respx mocks for the full flow."""
-    base = "https://api.superdocs.app"
+def _mock_chat_sequence(*responses: dict) -> None:
+    """Register a sequence of mock responses for POST /v1/chat.
 
-    # Step 1: start session
-    respx.post(f"{base}/v1/chat").mock(
-        return_value=httpx.Response(200, json={
-            "message": "Document loaded",
-            "document_changes": None,
-        })
+    The pipeline makes: load(1) + edit(1) + apparatus(N) calls.
+    Provide enough responses to cover all calls.
+    """
+    respx.post("https://api.superdocs.app/v1/chat").mock(
+        side_effect=[httpx.Response(200, json=r) for r in responses]
+    )
+
+
+def _mock_chat_repeating(response: dict) -> None:
+    """Register a single mock response that repeats for all calls."""
+    respx.post("https://api.superdocs.app/v1/chat").mock(
+        return_value=httpx.Response(200, json=response)
+    )
+
+
+def _mock_chat_error(status_code: int, error_body: dict) -> None:
+    """Register a single error response for POST /v1/chat."""
+    respx.post("https://api.superdocs.app/v1/chat").mock(
+        return_value=httpx.Response(status_code, json=error_body)
     )
 
 
 @pytest.mark.asyncio
 @respx.mock
 async def test_sync_flow_end_to_end() -> None:
-    """Full sync flow: load → edit → diff → inject apparatus."""
-    _setup_mocks()
+    """Full sync flow: load -> edit -> diff -> inject apparatus."""
+    _mock_chat_sequence(
+        # Step 1: start session
+        {"message": "Document loaded", "document_changes": None},
+        # Step 2: edit
+        {"message": "Edit applied", "document_changes": {
+            "chunk_id": "c1", "updated_html": EDITED_HTML
+        }},
+        # Step 3+: apparatus injections — record+highlights batch
+        {"message": "Apparatus injected", "document_changes": None},
+        # Step 4: change-bars batch
+        {"message": "Change bars added", "document_changes": None},
+    )
     async with SuperDocsClient(api_key="sk_test_key") as client:
         pipeline = RevisionPipeline(client)
         metadata = RevisionMetadata(
@@ -47,17 +70,6 @@ async def test_sync_flow_end_to_end() -> None:
             date="2025-01-15",
             changes=["Updated section 4.2", "Added new paragraph"],
             highlights_summary="Safety threshold increased",
-        )
-
-        # Mock the edit response to return edited HTML
-        respx.post("https://api.superdocs.app/v1/chat").mock(
-            return_value=httpx.Response(200, json={
-                "message": "Edit applied",
-                "document_changes": {
-                    "chunk_id": "c1",
-                    "updated_html": EDITED_HTML,
-                },
-            })
         )
 
         result = await pipeline.run(
@@ -78,23 +90,18 @@ async def test_sync_flow_end_to_end() -> None:
 @respx.mock
 async def test_no_changes_skips_apparatus() -> None:
     """When edit produces no changes, apparatus injection is skipped."""
-    _setup_mocks()
+    _mock_chat_sequence(
+        # Step 1: start session
+        {"message": "Document loaded", "document_changes": None},
+        # Step 2: edit returns same HTML (no changes)
+        {"message": "No changes needed", "document_changes": {"updated_html": SAMPLE_HTML}},
+    )
     async with SuperDocsClient(api_key="sk_test_key") as client:
         pipeline = RevisionPipeline(client)
         metadata = RevisionMetadata(
             revision_number="0042",
             date="2025-01-15",
             changes=["No changes"],
-        )
-
-        # Mock edit that returns same HTML (no changes)
-        respx.post("https://api.superdocs.app/v1/chat").mock(
-            return_value=httpx.Response(200, json={
-                "message": "No changes needed",
-                "document_changes": {
-                    "updated_html": SAMPLE_HTML,
-                },
-            })
         )
 
         result = await pipeline.run(
@@ -113,9 +120,7 @@ async def test_no_changes_skips_apparatus() -> None:
 @respx.mock
 async def test_session_load_failure_returns_error() -> None:
     """When session load fails, pipeline returns error without proceeding."""
-    respx.post("https://api.superdocs.app/v1/chat").mock(
-        return_value=httpx.Response(401, json={"error": "Unauthorized"})
-    )
+    _mock_chat_error(401, {"error": "Unauthorized"})
     async with SuperDocsClient(api_key="sk_test_key") as client:
         pipeline = RevisionPipeline(client)
         metadata = RevisionMetadata(
@@ -140,7 +145,12 @@ async def test_session_load_failure_returns_error() -> None:
 @respx.mock
 async def test_metadata_in_instruction_content() -> None:
     """Verify revision number and date appear in generated instructions."""
-    _setup_mocks()
+    _mock_chat_sequence(
+        {"message": "Document loaded", "document_changes": None},
+        {"message": "Edit applied", "document_changes": {"updated_html": EDITED_HTML}},
+        {"message": "Apparatus injected", "document_changes": None},
+        {"message": "Change bars added", "document_changes": None},
+    )
     async with SuperDocsClient(api_key="sk_test_key") as client:
         pipeline = RevisionPipeline(client)
         metadata = RevisionMetadata(
@@ -148,13 +158,6 @@ async def test_metadata_in_instruction_content() -> None:
             date="2025-06-01",
             changes=["Critical fix"],
             highlights_summary="Emergency patch",
-        )
-
-        respx.post("https://api.superdocs.app/v1/chat").mock(
-            return_value=httpx.Response(200, json={
-                "message": "Edit applied",
-                "document_changes": {"updated_html": EDITED_HTML},
-            })
         )
 
         result = await pipeline.run(
@@ -175,20 +178,18 @@ async def test_metadata_in_instruction_content() -> None:
 @respx.mock
 async def test_tracker_counts_ops() -> None:
     """Pipeline run increments the client's operation tracker."""
-    _setup_mocks()
+    _mock_chat_sequence(
+        {"message": "Document loaded", "document_changes": None},
+        {"message": "Done", "document_changes": {"updated_html": EDITED_HTML}},
+        {"message": "Apparatus injected", "document_changes": None},
+        {"message": "Change bars added", "document_changes": None},
+    )
     async with SuperDocsClient(api_key="sk_test_key") as client:
         pipeline = RevisionPipeline(client)
         metadata = RevisionMetadata(
             revision_number="0042",
             date="2025-01-15",
             changes=["Change 1"],
-        )
-
-        respx.post("https://api.superdocs.app/v1/chat").mock(
-            return_value=httpx.Response(200, json={
-                "message": "Done",
-                "document_changes": {"updated_html": EDITED_HTML},
-            })
         )
 
         result = await pipeline.run(

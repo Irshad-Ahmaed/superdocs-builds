@@ -63,6 +63,9 @@ def compute_tco(inputs: CalculatorInputs) -> CalculatorResults:
                  + (infrastructure_monthly × 12 × horizon)
     Buy cost = SuperDocs tier annual cost × horizon
     """
+    if inputs.horizon_years <= 0:
+        raise ValueError("horizon_years must be positive")
+
     build_one_time = inputs.hours * inputs.hourly_cost
     build_maintenance_annual = (
         inputs.maintenance_rate * inputs.hours * inputs.hourly_cost

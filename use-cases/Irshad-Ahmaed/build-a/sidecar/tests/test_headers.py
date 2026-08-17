@@ -11,14 +11,7 @@ import respx
 from build_a.client import SuperDocsClient
 from build_a.headers import ControlledExporter, HeaderFooterStamper
 
-
 TEST_API_KEY = "sk_test_key"
-
-
-@pytest.fixture
-async def client() -> SuperDocsClient:
-    async with SuperDocsClient(api_key=TEST_API_KEY) as c:
-        yield c
 
 
 @pytest.mark.asyncio

@@ -10,8 +10,6 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-import httpx
-
 from .client import SuperDocsClient, SuperDocsError
 
 logger = logging.getLogger(__name__)
@@ -123,8 +121,7 @@ class ControlledExporter:
 
     async def _download(self, url: str, dest: Path) -> None:
         """Download a file from a URL and write to disk."""
-        async with httpx.AsyncClient() as http:
-            resp = await http.get(url)
-            resp.raise_for_status()
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(resp.content)
+        resp = await self.client._client.get(url)
+        resp.raise_for_status()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(resp.content)
