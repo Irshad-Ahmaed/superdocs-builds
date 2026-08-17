@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    paths: ['use-cases/Irshad-Ahmaed/**']
+  pull_request:
+    paths: ['use-cases/Irshad-Ahmaed/**']
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: use-cases/Irshad-Ahmaed/build-a/sidecar
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: ruff check .
+      - run: mypy build_a/
+      - run: pytest
+
+  react-a:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: use-cases/Irshad-Ahmaed/build-a/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test
+
+  react-b:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: use-cases/Irshad-Ahmaed/build-b/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test
