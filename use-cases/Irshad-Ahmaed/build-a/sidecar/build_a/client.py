@@ -196,6 +196,8 @@ class SuperDocsClient:
         self, session_id: str | None = None, format: str = "pdf", html: str | None = None
     ) -> ExportResponse:
         """Export a finished file (0 ops)."""
+        if not session_id and not html:
+            raise SuperDocsError("export() requires either session_id or html")
         payload: dict[str, Any] = {"format": format}
         if session_id:
             payload["session_id"] = session_id

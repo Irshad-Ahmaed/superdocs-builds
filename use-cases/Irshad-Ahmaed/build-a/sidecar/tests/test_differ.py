@@ -89,7 +89,7 @@ def test_from_chunk_diffs_all_unchanged() -> None:
 
 def test_empty_html_both_sides() -> None:
     differ = DocDiffer()
-    result = differ.diff("", "")
+    result = differ.diff("<html><body></body></html>", "<html><body></body></html>")
     assert not result.has_changes
     assert result.total_paragraphs_old == 0
     assert result.total_paragraphs_new == 0
@@ -101,3 +101,20 @@ def test_formatting_only_changes() -> None:
     differ = DocDiffer()
     result = differ.diff(pre, post)
     assert not result.has_changes  # text is identical
+
+
+def test_div_wrapped_content() -> None:
+    pre = '<html><body><div><p>Paragraph inside div</p></div></body></html>'
+    post = '<html><body><div><p>Modified paragraph inside div</p></div></body></html>'
+    differ = DocDiffer()
+    result = differ.diff(pre, post)
+    assert result.has_changes
+
+
+def test_nested_lists() -> None:
+    pre = '<html><body><ul><li>Item A</li><li>Item B</li></ul></body></html>'
+    post = '<html><body><ul><li>Item A</li><li>Item B modified</li></ul></body></html>'
+    differ = DocDiffer()
+    result = differ.diff(pre, post)
+    assert result.has_changes
+    assert len(result.changed) == 1

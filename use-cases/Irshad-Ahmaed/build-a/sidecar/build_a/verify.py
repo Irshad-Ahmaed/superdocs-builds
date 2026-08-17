@@ -63,7 +63,6 @@ async def export_pdf(client: SuperDocsClient, session_id: str, output_path: Path
 def verify_pdf(
     pdf_path: Path,
     expected_revision: str | None = None,
-    changed_positions: list[int] | None = None,
 ) -> VerificationReport:
     """Parse and verify a controlled PDF.
 

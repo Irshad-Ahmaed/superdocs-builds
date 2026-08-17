@@ -4,7 +4,7 @@ import httpx
 import pytest
 import respx
 
-from build_a.client import AuthError, OperationTracker, SuperDocsClient
+from build_a.client import AuthError, OperationTracker, SuperDocsClient, SuperDocsError
 
 
 def test_tracker_counts_ops() -> None:
@@ -62,3 +62,10 @@ async def test_list_sessions() -> None:
         sessions = await client.list_sessions()
         assert len(sessions) == 2
         assert sessions[0].session_id == "s1"
+
+
+@pytest.mark.asyncio
+async def test_export_requires_session_or_html() -> None:
+    async with SuperDocsClient(api_key="sk_test_key") as client:
+        with pytest.raises(SuperDocsError, match="requires either"):
+            await client.export()

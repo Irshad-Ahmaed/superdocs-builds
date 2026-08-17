@@ -53,11 +53,20 @@ class DiffResult:
 
 
 def extract_paragraphs(html: str) -> list[tuple[str, str | None]]:
-    """Extract paragraphs from HTML, returning (text, chunk_id) pairs."""
+    """Extract paragraphs from HTML, returning (text, chunk_id) pairs.
+
+    Captures block-level text elements plus any direct text children of body
+    that aren't inside a block element (handles SuperDocs-generated HTML where
+    content may sit directly under body).
+    """
     soup = BeautifulSoup(html, "html.parser")
+    block_tags = {
+        "p", "h1", "h2", "h3", "h4", "h5", "h6",
+        "li", "td", "th", "div", "blockquote",
+    }
     results: list[tuple[str, str | None]] = []
 
-    for el in soup.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "td", "th"]):
+    for el in soup.find_all(list(block_tags)):
         text = el.get_text(strip=True)
         if not text:
             continue
