@@ -1,7 +1,7 @@
-"""PDF export and verification harness.
+"""PDF verification harness for Build A.
 
-Handles export via SuperDocs API, PDF download, and verification of
-change bars, headers/footers, and revision-record table.
+Parses exported PDFs and verifies change bars, headers/footers,
+and revision-record table.
 """
 
 from __future__ import annotations
@@ -9,8 +9,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-
-from .client import SuperDocsClient, SuperDocsError
 
 
 @dataclass
@@ -31,33 +29,6 @@ class VerificationReport:
     def summary(self) -> str:
         lines = [f"{'PASS' if c.passed else 'FAIL'}: {c.name} — {c.details}" for c in self.checks]
         return "\n".join(lines)
-
-
-async def export_pdf(client: SuperDocsClient, session_id: str, output_path: Path) -> Path:
-    """Export a PDF via SuperDocs API and save to disk.
-
-    Tries direct export first, falls back to pre-signed URL for large files.
-    """
-    import httpx
-
-    try:
-        result = await client.export(session_id=session_id, format="pdf")
-        if result.download_url:
-            async with httpx.AsyncClient() as http:
-                pdf_resp = await http.get(result.download_url)
-                pdf_resp.raise_for_status()
-                output_path.write_bytes(pdf_resp.content)
-                return output_path
-    except SuperDocsError:
-        pass
-
-    # Fallback: pre-signed download URL
-    dl = await client.request_download(session_id, format="pdf")
-    async with httpx.AsyncClient() as http:
-        pdf_resp = await http.get(dl.download_url)
-        pdf_resp.raise_for_status()
-        output_path.write_bytes(pdf_resp.content)
-        return output_path
 
 
 def verify_pdf(
