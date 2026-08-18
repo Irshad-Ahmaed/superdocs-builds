@@ -226,33 +226,18 @@ async def step_apparatus(req: ApparatusRequest) -> ApparatusResponse:
         instructions = apparatus.generate_combined(diff, metadata)
 
         combined_instruction = " ".join(instructions)
-        stamp_via_parts = False
-        document_id = None
 
         async with SuperDocsClient() as client:
-            # Check if stamp is requested and if parts API is available
+            # Append stamp instruction to the combined apparatus call (1 op total)
+            stamp_result = None
             if req.include_stamp:
-                try:
-                    docs = await client.list_session_documents(req.session_id)
-                    if docs and isinstance(docs, list) and len(docs) > 0:
-                        doc = docs[0]
-                        document_id = (
-                            doc.get("document_id")
-                            or doc.get("durable_document_id")
-                        )
-                except SuperDocsError:
-                    pass
+                stamper = HeaderFooterStamper.__new__(HeaderFooterStamper)
+                stamp_instruction = stamper.build_combined_instruction(
+                    req.revision_number, req.date,
+                )
+                combined_instruction += f" {stamp_instruction}"
 
-                if document_id:
-                    stamp_via_parts = True
-                else:
-                    stamper = HeaderFooterStamper.__new__(HeaderFooterStamper)
-                    stamp_instruction = stamper.build_combined_instruction(
-                        req.revision_number, req.date,
-                    )
-                    combined_instruction += f" {stamp_instruction}"
-
-            # Send apparatus (and stamp via chat fallback) in one edit call
+            # Send apparatus + stamp in one edit call
             try:
                 await client.edit(combined_instruction, req.session_id)
                 ops = 1
@@ -262,39 +247,8 @@ async def step_apparatus(req: ApparatusRequest) -> ApparatusResponse:
                     apparatus_instructions=instructions, errors=[str(e)],
                 )
 
-            # Apply stamp via parts API if available (0 ops)
-            stamp_result = None
-            if stamp_via_parts:
-                header_html = f"Revision {req.revision_number} — {req.date}"
-                footer_html = (
-                    "Page <span data-field=\"PAGE\">1</span> of "
-                    "<span data-field=\"NUMPAGES\">1</span>"
-                )
-                try:
-                    parts = {
-                        "headers": {"0": {"default": f"<p>{header_html}</p>"}},
-                        "footers": {"0": {"default": f"<p>{footer_html}</p>"}},
-                    }
-                    await client.update_document_parts(document_id, parts)
-                    stamp_result = StampResponse(
-                        session_id=req.session_id,
-                        header_text=header_html,
-                        footer_text="Page X of Y",
-                        ops_used=0,
-                        verified_header=True,
-                        verified_footer=True,
-                    )
-                except SuperDocsError as e:
-                    logger.warning("Parts API stamp failed: %s", e)
-                    stamp_result = StampResponse(
-                        session_id=req.session_id,
-                        header_text=f"Revision {req.revision_number} — {req.date}",
-                        footer_text="Page X of Y",
-                        ops_used=0,
-                        verified_header=False,
-                        verified_footer=False,
-                    )
-            elif req.include_stamp:
+            # Verify stamp was applied
+            if req.include_stamp:
                 verified_header = False
                 verified_footer = False
                 try:
@@ -302,8 +256,12 @@ async def step_apparatus(req: ApparatusRequest) -> ApparatusResponse:
                     if history.document_html:
                         import re
                         html_lower = history.document_html.lower()
-                        verified_header = f"revision {req.revision_number}".lower() in html_lower
-                        verified_footer = bool(re.search(r'page\s+\d+\s+of\s+\d+', html_lower))
+                        verified_header = (
+                            f"revision {req.revision_number}".lower() in html_lower
+                        )
+                        verified_footer = bool(
+                            re.search(r'page\s+\d+\s+of\s+\d+', html_lower)
+                        )
                 except SuperDocsError:
                     pass
                 stamp_result = StampResponse(

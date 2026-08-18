@@ -42,9 +42,6 @@ async def test_build_header_instruction() -> None:
 async def test_stamp_sends_single_chat_turn() -> None:
     """Stamp sends exactly one chat instruction for both header and footer."""
     async with SuperDocsClient(api_key=TEST_API_KEY) as client:
-        respx.get("https://api.superdocs.app/v1/sessions/test-session/documents").mock(
-            return_value=httpx.Response(200, json={"documents": []})
-        )
         respx.post("https://api.superdocs.app/v1/chat").mock(
             return_value=httpx.Response(200, json={
                 "response": "Headers and footers updated",
@@ -63,9 +60,6 @@ async def test_stamp_sends_single_chat_turn() -> None:
 async def test_stamp_records_operation() -> None:
     """Stamp increments the client's operation tracker."""
     async with SuperDocsClient(api_key=TEST_API_KEY) as client:
-        respx.get("https://api.superdocs.app/v1/sessions/test-session/documents").mock(
-            return_value=httpx.Response(200, json={"documents": []})
-        )
         respx.post("https://api.superdocs.app/v1/chat").mock(
             return_value=httpx.Response(200, json={
                 "response": "Done",
