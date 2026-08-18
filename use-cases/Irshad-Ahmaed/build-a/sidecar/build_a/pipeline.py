@@ -73,13 +73,12 @@ class RevisionPipeline:
         """Run the full revision flow.
 
         Steps:
-        1. Start session + load document (1 op)
-        2. Apply edit instructions (1 op, sync or async)
-        3. (Optional) HITL approval for edit
-        4. Diff pre-edit vs post-edit HTML
-        5. Generate apparatus instructions
-        6. Send apparatus instructions (1 op per batch)
-        7. (Optional) HITL approval for apparatus
+        1. Start session + load document + apply edit (1 op — combined)
+        2. (Optional) HITL approval for edit
+        3. Diff pre-edit vs post-edit HTML
+        4. Generate apparatus instructions
+        5. Send apparatus instructions (1 op per batch)
+        6. (Optional) HITL approval for apparatus
 
         Args:
             document_html: The prior revision's HTML to load.
@@ -95,32 +94,22 @@ class RevisionPipeline:
             changed=[], total_paragraphs_old=0, total_paragraphs_new=0,
         ))
 
-        # Step 1: Start session + load document (1 op)
+        # Step 1: Start session + load + apply edit in single call (1 op)
+        pre_edit_html = document_html
         try:
-            await self.client.start_session(document_html, session_id)
+            edit_result_resp = await self.client.start_session(
+                document_html, session_id, message=edit_instructions,
+            )
+            edit_result = edit_result_resp.model_dump()
         except SuperDocsError as e:
-            result.errors.append(f"Step 1 (load): {e}")
+            result.errors.append(f"Step 1 (load+edit): {e}")
             return result
 
-        # Step 2: Apply edit instructions
-        pre_edit_html = document_html  # save for diffing
-        if use_async:
-            edit_result = await self._apply_edit_async(
-                session_id, edit_instructions, approval_mode, hitl_approvals, result
-            )
-        else:
-            edit_result = await self._apply_edit_sync(
-                session_id, edit_instructions, result
-            )
-
-        if edit_result is None:
-            return result
-
-        # Step 3: Get post-edit HTML
+        # Step 2: Get post-edit HTML
         post_edit_html = await self._get_post_edit_html(session_id, edit_result)
         result.post_edit_html = post_edit_html
 
-        # Step 4: Diff
+        # Step 3: Diff
         result.diff = self.differ.diff(pre_edit_html, post_edit_html)
         logger.info(
             "Diff: %d changed paragraphs out of %d old / %d new",
@@ -134,7 +123,7 @@ class RevisionPipeline:
             result.ops_used = self.client.tracker.total_ops
             return result
 
-        # Step 5-6: Generate and send apparatus instructions
+        # Step 4-5: Generate and send apparatus instructions
         instructions = self.apparatus.generate_combined(result.diff, metadata)
         result.apparatus_instructions = instructions
 

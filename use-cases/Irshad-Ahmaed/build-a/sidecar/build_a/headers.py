@@ -46,7 +46,10 @@ class HeaderFooterStamper:
 
     def build_footer_instruction(self) -> str:
         """Build the chat instruction to set page-numbered footer."""
-        return "Set the footer on every page to include page numbers."
+        return (
+            "Set the footer on every page to show page numbers in the format 'Page X of Y'. "
+            "Use a consistent font and size matching the header."
+        )
 
     def build_combined_instruction(
         self, revision_number: str, date: str
@@ -68,10 +71,12 @@ class HeaderFooterStamper:
         """
         instruction = self.build_combined_instruction(revision_number, date)
         await self.client.edit(message=instruction, session_id=session_id)
+        header = f"Revision {revision_number} — {date}"
+        footer = "Page X of Y (auto-numbered by SuperDocs)"
         return StampResult(
             session_id=session_id,
-            header_text=f"Revision {revision_number} — {date}",
-            footer_text="Page numbers",
+            header_text=header,
+            footer_text=footer,
             ops_used=1,
         )
 

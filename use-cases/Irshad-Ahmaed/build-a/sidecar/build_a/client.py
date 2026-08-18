@@ -209,17 +209,18 @@ class SuperDocsClient:
         self,
         document_html: str,
         session_id: str,
-        message: str = "Load this document.",
+        message: str = "",
     ) -> ChatResponse:
-        """Start a session and load a document (1 op).
+        """Start a session and load a document.
 
         The first request with a new session_id starts the session and loads
-        the document. message is required by the API and defaults to a load instruction.
+        the document. If message is provided, it's applied as an edit in the
+        same call (combines load + edit into 1 op instead of 2).
         """
         payload: dict[str, Any] = {
             "session_id": session_id,
             "document_html": document_html,
-            "message": message,
+            "message": message or "",
         }
         resp = await self._post("/v1/chat", payload)
         self.tracker.record("start_session", 1, f"session={session_id}")

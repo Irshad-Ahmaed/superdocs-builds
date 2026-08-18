@@ -25,16 +25,21 @@ interface PipelineResult {
 const API = '/api'
 
 const SAMPLE_HTML = `<html><body>
-<h1>Flight Crew Operating Manual</h1>
+<h1>Flight Crew Operating Manual — Rev 0043</h1>
 <p>Section 4.1: Normal Procedures</p>
-<p>The aircraft must be inspected before every flight.</p>
-<p>Minimum crew complement: 2 pilots.</p>
+<p>The aircraft must be inspected before every flight per the checklist in Appendix B.</p>
+<p>Minimum crew complement: 2 pilots for domestic operations.</p>
+<p>Both pilots must hold valid first-class medical certificates.</p>
 <p>Section 4.2: Emergency Procedures</p>
-<p>In case of engine failure, follow the single-engine approach procedure.</p>
+<p>In case of engine failure, follow the single-engine approach procedure in 4.2.1.</p>
 <p>Declare emergency on frequency 121.5 and divert to nearest suitable airport.</p>
+<p>The pilot-in-command must brief all passengers before emergency landing.</p>
 <p>Section 4.3: Communication Protocol</p>
 <p>All crew members must monitor VHF Channel 121.5 during flight.</p>
-<p>Standard phraseology must be used at all times.</p>
+<p>Standard phraseology must be used at all times per ICAO Annex 10.</p>
+<p>Section 4.4: Documentation Requirements</p>
+<p>Flight logs must be completed within 24 hours of landing.</p>
+<p>Maintenance reports filed in the central system before end of shift.</p>
 </body></html>`
 
 function DiffView({ entries }: { entries: DiffEntry[] }) {
@@ -98,7 +103,8 @@ function App() {
     setLog([])
     const sid = `revision-${revisionNumber}-${Date.now()}`
     try {
-      addLog('Starting revision pipeline...')
+      addLog('Starting revision pipeline (load + edit + diff + apparatus)...')
+      const t0 = Date.now()
       const pipelineRes = await fetch(`${API}/pipeline`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -114,11 +120,12 @@ function App() {
       })
       if (!pipelineRes.ok) throw new Error(`Pipeline failed: ${pipelineRes.statusText}`)
       const pipeline = await pipelineRes.json() as PipelineResult
-      addLog(`Pipeline complete: ${pipeline.changes_count} changes detected, ${pipeline.ops_used} ops used`)
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+      addLog(`Pipeline complete in ${elapsed}s: ${pipeline.changes_count} changes, ${pipeline.ops_used} ops`)
       setOpsUsed(pipeline.ops_used)
       setResult(pipeline)
 
-      addLog('Stamping headers and footers...')
+      addLog('Stamping headers and footers (1 op)...')
       const stampRes = await fetch(`${API}/stamp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -130,11 +137,12 @@ function App() {
       })
       if (!stampRes.ok) throw new Error(`Stamp failed: ${stampRes.statusText}`)
       const stamp = await stampRes.json()
-      addLog(`Headers: ${stamp.header_text} | Footer: ${stamp.footer_text}`)
+      addLog(`Header: ${stamp.header_text}`)
+      addLog(`Footer: ${stamp.footer_text}`)
       setStampResult(stamp)
       setOpsUsed(prev => prev + stamp.ops_used)
       setStep('done')
-      addLog('Done!')
+      addLog(`Total ops: ${pipeline.ops_used + stamp.ops_used} (pipeline ${pipeline.ops_used} + stamp ${stamp.ops_used})`)
     } catch (e) {
       setError(String(e))
       setStep('error')
@@ -171,7 +179,7 @@ function App() {
           style={{ padding: '10px 28px', borderRadius: 4, border: 'none', background: step === 'running' ? '#93c5fd' : '#2563eb', color: '#fff', cursor: step === 'running' ? 'wait' : 'pointer', fontSize: 14, fontWeight: 600 }}>
           {step === 'running' ? 'Running...' : 'Run Pipeline'}
         </button>
-        <span style={{ marginLeft: 16, color: '#666', fontSize: 13 }}>Ops used: {opsUsed}</span>
+        <span style={{ marginLeft: 16, color: '#666', fontSize: 13 }}>Total ops: {opsUsed}</span>
       </div>
 
       {error && (
@@ -197,8 +205,8 @@ function App() {
               <div style={{ fontSize: 12, color: '#666' }}>Changes Detected</div>
             </div>
             <div style={{ background: '#eff6ff', borderRadius: 8, padding: 16, textAlign: 'center', border: '1px solid #bfdbfe' }}>
-              <div style={{ fontSize: 28, fontWeight: 700, color: '#1e40af' }}>{result.ops_used}</div>
-              <div style={{ fontSize: 12, color: '#666' }}>Operations Used</div>
+              <div style={{ fontSize: 28, fontWeight: 700, color: '#1e40af' }}>{opsUsed}</div>
+              <div style={{ fontSize: 12, color: '#666' }}>Total Operations</div>
             </div>
             <div style={{ background: '#f5f3ff', borderRadius: 8, padding: 16, textAlign: 'center', border: '1px solid #ddd6fe' }}>
               <div style={{ fontSize: 28, fontWeight: 700, color: '#6d28d9' }}>{result.apparatus_instructions.length}</div>
@@ -260,6 +268,28 @@ function App() {
           )}
         </div>
       )}
+
+      {/* How it works */}
+      <div style={{ marginTop: 32, background: '#f8f9fa', borderRadius: 8, padding: 20, border: '1px solid #e9ecef' }}>
+        <h2 style={{ marginTop: 0, fontSize: 18 }}>How It Works</h2>
+        <div style={{ fontSize: 13, lineHeight: 1.7, color: '#444' }}>
+          <p><strong>Architecture:</strong> React Frontend → REST API → Python FastAPI Sidecar → SuperDocs REST API</p>
+          <p><strong>Pipeline steps (2 ops total):</strong></p>
+          <ol style={{ paddingLeft: 20, marginTop: 4 }}>
+            <li><strong>Load + Edit (1 op):</strong> Document HTML is loaded into a SuperDocs session and edit instructions are applied in a single API call. SuperDocs returns the modified document.</li>
+            <li><strong>Diff (0 ops):</strong> The sidecar compares pre-edit vs post-edit HTML locally — no API cost. Produces paragraph-level change list.</li>
+            <li><strong>Apparatus Injection (1 op per batch):</strong> Change bars, revision-record table, and highlights-of-change are sent as chat instructions. Each batch is one API call (max 25 paragraphs per batch).</li>
+            <li><strong>Header/Footer Stamp (1 op):</strong> Revision number + date stamped on every page via a single chat instruction.</li>
+          </ol>
+          <p style={{ marginTop: 12 }}><strong>Example result:</strong></p>
+          <ul style={{ paddingLeft: 20, marginTop: 4 }}>
+            <li>Input: 13-paragraph FCOM document + edit "change crew from 2 to 3 pilots"</li>
+            <li>Output: 1 modified paragraph (position 3), 1 apparatus batch (change bars + record table + highlights)</li>
+            <li>Ops: 1 (load+edit) + 1 (apparatus) + 1 (stamp) = <strong>3 total</strong></li>
+            <li>Time: ~3-5 seconds (2 sequential API calls)</li>
+          </ul>
+        </div>
+      </div>
     </div>
   )
 }

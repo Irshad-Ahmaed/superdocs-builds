@@ -25,7 +25,7 @@ EDITED_HTML = """<html><body>
 def _mock_chat_sequence(*responses: dict) -> None:
     """Register a sequence of mock responses for POST /v1/chat.
 
-    The pipeline makes: load(1) + edit(1) + apparatus(N) calls.
+    Pipeline now combines load+edit into 1 call, then apparatus(N).
     Provide enough responses to cover all calls.
     """
     respx.post("https://api.superdocs.app/v1/chat").mock(
@@ -50,17 +50,15 @@ def _mock_chat_error(status_code: int, error_body: dict) -> None:
 @pytest.mark.asyncio
 @respx.mock
 async def test_sync_flow_end_to_end() -> None:
-    """Full sync flow: load -> edit -> diff -> inject apparatus."""
+    """Full sync flow: load+edit -> diff -> inject apparatus."""
     _mock_chat_sequence(
-        # Step 1: start session
-        {"response": "Document loaded", "session_id": "test-revision", "document_changes": None},
-        # Step 2: edit
+        # Step 1: combined load+edit
         {"response": "Edit applied", "session_id": "test-revision", "document_changes": {
             "updated_html": EDITED_HTML
         }},
-        # Step 3+: apparatus injections — record+highlights batch
+        # Step 2+: apparatus injections — record+highlights batch
         {"response": "Apparatus injected", "session_id": "test-revision", "document_changes": None},
-        # Step 4: change-bars batch
+        # Step 3: change-bars batch
         {"response": "Change bars added", "session_id": "test-revision", "document_changes": None},
     )
     async with SuperDocsClient(api_key="sk_test_key") as client:
@@ -91,9 +89,7 @@ async def test_sync_flow_end_to_end() -> None:
 async def test_no_changes_skips_apparatus() -> None:
     """When edit produces no changes, apparatus injection is skipped."""
     _mock_chat_sequence(
-        # Step 1: start session
-        {"response": "Document loaded", "session_id": "test-no-changes", "document_changes": None},
-        # Step 2: edit returns same HTML (no changes)
+        # Step 1: combined load+edit returns same HTML (no changes)
         {"response": "No changes needed", "session_id": "test-no-changes",
          "document_changes": {"updated_html": SAMPLE_HTML}},
     )
@@ -147,7 +143,6 @@ async def test_session_load_failure_returns_error() -> None:
 async def test_metadata_in_instruction_content() -> None:
     """Verify revision number and date appear in generated instructions."""
     _mock_chat_sequence(
-        {"response": "Document loaded", "session_id": "test-metadata", "document_changes": None},
         {"response": "Edit applied", "session_id": "test-metadata",
          "document_changes": {"updated_html": EDITED_HTML}},
         {"response": "Apparatus injected", "session_id": "test-metadata", "document_changes": None},
@@ -181,7 +176,6 @@ async def test_metadata_in_instruction_content() -> None:
 async def test_tracker_counts_ops() -> None:
     """Pipeline run increments the client's operation tracker."""
     _mock_chat_sequence(
-        {"response": "Document loaded", "session_id": "test-ops", "document_changes": None},
         {"response": "Done", "session_id": "test-ops",
          "document_changes": {"updated_html": EDITED_HTML}},
         {"response": "Apparatus injected", "session_id": "test-ops", "document_changes": None},
@@ -202,6 +196,6 @@ async def test_tracker_counts_ops() -> None:
             metadata=metadata,
         )
 
-        # At least: 1 (load) + 1 (edit) + N (apparatus injections)
-        assert result.ops_used >= 2
-        assert client.tracker.total_ops >= 2
+        # 1 (load+edit combined) + N (apparatus injections)
+        assert result.ops_used >= 1
+        assert client.tracker.total_ops >= 1
