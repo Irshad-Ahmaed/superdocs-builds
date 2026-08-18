@@ -185,56 +185,61 @@ function App() {
       runningOps += loadEdit.ops_used
       setTotalOps(runningOps)
 
-      // ── Step 2+3: Apparatus + Stamp in parallel ──
+      // ── Step 2+3: Apparatus + Stamp in parallel (only if changes detected) ──
       setPipelineStep('apparatus')
       const t2 = Date.now()
-      addLog('Step 2/3: Apparatus + Stamp running in parallel...')
 
-      const [appRes, stampRes] = await Promise.all([
-        fetch(`${API}/step/apparatus`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            session_id: sid,
-            pre_edit_html: actualPreEdit,
-            post_edit_html: loadEdit.post_edit_html,
-            revision_number: revisionNumber,
-            date: date,
-            changes: changes,
-            highlights_summary: 'Crew requirement increased from 2 to 3 for long-haul flights; type rating mandate added',
-          }),
+      // Run apparatus first to check for changes
+      addLog('Step 2/3: Running local diff + generating apparatus instructions...')
+      const appRes = await fetch(`${API}/step/apparatus`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sid,
+          pre_edit_html: actualPreEdit,
+          post_edit_html: loadEdit.post_edit_html,
+          revision_number: revisionNumber,
+          date: date,
+          changes: changes,
+          highlights_summary: 'Crew requirement increased from 2 to 3 for long-haul flights; type rating mandate added',
         }),
-        fetch(`${API}/stamp`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            session_id: sid,
-            revision_number: revisionNumber,
-            date: date,
-          }),
-        }),
-      ])
-
+      })
       if (!appRes.ok) throw new Error(`Apparatus failed: ${appRes.statusText}`)
-      if (!stampRes.ok) throw new Error(`Stamp failed: ${stampRes.statusText}`)
-
-      const [apparatus, stamp] = await Promise.all([
-        appRes.json() as Promise<ApparatusResult>,
-        stampRes.json() as Promise<StampResult>,
-      ])
-
+      const apparatus = await appRes.json() as ApparatusResult
       if (!apparatus.success) throw new Error(apparatus.errors.join(', '))
+
+      setDiffEntries(apparatus.diff_entries)
+      setApparatusInstructions(apparatus.apparatus_instructions)
+      runningOps += apparatus.ops_used
 
       const t2Done = Date.now()
       setStepTimers(prev => ({ ...prev, 'apparatus': t2Done - t2 }))
       addLog(`Apparatus: ${apparatus.changes_count} changes, ${apparatus.ops_used} op(s)`)
-      addLog(`Stamp: ${stamp.header_text} — ${stamp.footer_text}`)
-      addLog(`  Header verified: ${stamp.verified_header ? '✓' : '✗'}`)
-      addLog(`  Footer verified: ${stamp.verified_footer ? '✓' : '✗ — check document manually'}`)
-      setDiffEntries(apparatus.diff_entries)
-      setApparatusInstructions(apparatus.apparatus_instructions)
-      setStampResult(stamp)
-      runningOps += apparatus.ops_used + stamp.ops_used
+
+      // Only stamp if there are actual changes (avoids wasting 1 op on no-op stamp)
+      let stamp: StampResult | null = null
+      if (apparatus.changes_count > 0) {
+        addLog('Step 3/3: Stamping headers and footers...')
+        const stampRes = await fetch(`${API}/stamp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: sid,
+            revision_number: revisionNumber,
+            date: date,
+          }),
+        })
+        if (!stampRes.ok) throw new Error(`Stamp failed: ${stampRes.statusText}`)
+        stamp = await stampRes.json() as StampResult
+        addLog(`Stamp: ${stamp.header_text} — ${stamp.footer_text}`)
+        addLog(`  Header verified: ${stamp.verified_header ? '✓' : '✗'}`)
+        addLog(`  Footer verified: ${stamp.verified_footer ? '✓' : '✗ — check document manually'}`)
+        setStampResult(stamp)
+        runningOps += stamp.ops_used
+      } else {
+        addLog('No changes detected — skipping stamp (already applied)')
+      }
+
       setTotalOps(runningOps)
 
       setPipelineStep('done')

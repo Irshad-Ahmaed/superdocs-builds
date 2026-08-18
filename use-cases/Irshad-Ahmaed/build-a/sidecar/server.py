@@ -114,21 +114,34 @@ class LoadEditResponse(BaseModel):
 
 @app.post("/api/step/load-edit", response_model=LoadEditResponse)
 async def step_load_edit(req: LoadEditRequest) -> LoadEditResponse:
-    """Step 1: Load document + apply edit instructions (1 API call, 1 op)."""
+    """Step 1: Load document + apply edit instructions.
+
+    For new sessions: start_session loads doc + applies edit (1 op).
+    For existing sessions: edit only (1 op) — server persists doc across turns.
+    """
     try:
         async with SuperDocsClient() as client:
-            # Fetch current document state before applying edits
+            # Check if session already has a document
             pre_html = ""
+            session_exists = False
             try:
                 history = await client.get_session_history(req.session_id)
                 if history.document_html:
                     pre_html = history.document_html
+                    session_exists = True
             except SuperDocsError:
                 pass
 
-            resp = await client.start_session(
-                req.document_html, req.session_id, message=req.edit_instructions,
-            )
+            if session_exists:
+                # Existing session — send edit only, omit document_html
+                # Server persists the document across turns per API contract
+                resp = await client.edit(req.edit_instructions, req.session_id)
+            else:
+                # New session — load document + apply edit in one call
+                resp = await client.start_session(
+                    req.document_html, req.session_id, message=req.edit_instructions,
+                )
+
             post_html = ""
             doc_changes = resp.document_changes
             if doc_changes and doc_changes.updated_html:
@@ -138,7 +151,6 @@ async def step_load_edit(req: LoadEditRequest) -> LoadEditResponse:
                 if history.document_html:
                     post_html = history.document_html
 
-            # Use fetched pre-edit HTML; fall back to input document_html
             if not pre_html:
                 pre_html = req.document_html
 

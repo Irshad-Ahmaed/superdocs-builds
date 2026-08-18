@@ -54,10 +54,13 @@ class HeaderFooterStamper:
     def build_combined_instruction(
         self, revision_number: str, date: str
     ) -> str:
-        """Combine header + footer instructions into a single chat turn."""
+        """Combine header + footer + page numbering into a single chat turn."""
         header = self.build_header_instruction(revision_number, date)
         footer = self.build_footer_instruction()
-        return f"{header}. {footer}."
+        return (
+            f"{header}. {footer}. "
+            f"Also enable decimal page numbering starting from 1 for all sections."
+        )
 
     async def stamp(
         self,
