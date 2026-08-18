@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 
 type Step = 'idle' | 'running' | 'done' | 'error'
+type PipelineStep = 'load-edit' | 'apparatus' | 'stamp' | 'done'
 
 interface DiffEntry {
   position: number
@@ -9,17 +10,29 @@ interface DiffEntry {
   new_text: string
 }
 
-interface PipelineResult {
+interface LoadEditResult {
+  success: boolean
+  ops_used: number
+  post_edit_html: string
+  response_text: string
+  errors: string[]
+}
+
+interface ApparatusResult {
   success: boolean
   ops_used: number
   changes_count: number
   apparatus_instructions: string[]
-  errors: string[]
   diff_entries: DiffEntry[]
   total_paragraphs_old: number
   total_paragraphs_new: number
-  pre_edit_html: string
-  post_edit_html: string
+  errors: string[]
+}
+
+interface StampResult {
+  header_text: string
+  footer_text: string
+  ops_used: number
 }
 
 const API = '/api'
@@ -81,51 +94,122 @@ function DocumentPreview({ html, label }: { html: string; label: string }) {
   )
 }
 
+interface LogEntry {
+  msg: string
+  time?: number
+}
+
 function App() {
   const [step, setStep] = useState<Step>('idle')
+  const [pipelineStep, setPipelineStep] = useState<PipelineStep>('idle')
   const [error, setError] = useState('')
-  const [opsUsed, setOpsUsed] = useState(0)
+  const [totalOps, setTotalOps] = useState(0)
   const [editInstructions, setEditInstructions] = useState('')
   const [revisionNumber, setRevisionNumber] = useState('0042')
   const [date, setDate] = useState('2025-01-15')
-  const [result, setResult] = useState<PipelineResult | null>(null)
-  const [stampResult, setStampResult] = useState<{ header_text: string; footer_text: string; ops_used: number } | null>(null)
-  const [log, setLog] = useState<string[]>([])
+  const [preEditHtml, setPreEditHtml] = useState('')
+  const [postEditHtml, setPostEditHtml] = useState('')
+  const [diffEntries, setDiffEntries] = useState<DiffEntry[]>([])
+  const [apparatusInstructions, setApparatusInstructions] = useState<string[]>([])
+  const [stampResult, setStampResult] = useState<StampResult | null>(null)
+  const [log, setLog] = useState<LogEntry[]>([])
+  const [stepTimers, setStepTimers] = useState<Record<string, number>>({})
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [elapsed, setElapsed] = useState(0)
 
-  const addLog = (msg: string) => setLog(prev => [...prev, msg])
+  const addLog = (msg: string) => setLog(prev => [...prev, { msg }])
+
+  const startTimer = () => {
+    setElapsed(0)
+    timerRef.current = setInterval(() => setElapsed(prev => prev + 100), 100)
+  }
+
+  const stopTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+  }
+
+  const timeSince = (start: number) => `${((Date.now() - start) / 1000).toFixed(1)}s`
 
   const handleRun = async () => {
     setStep('running')
+    setPipelineStep('load-edit')
     setError('')
-    setOpsUsed(0)
-    setResult(null)
+    setTotalOps(0)
+    setPreEditHtml('')
+    setPostEditHtml('')
+    setDiffEntries([])
+    setApparatusInstructions([])
     setStampResult(null)
     setLog([])
+    setStepTimers({})
+    startTimer()
+
     const sid = `revision-${revisionNumber}-${Date.now()}`
+    const instructions = editInstructions || `Update section 4.1: change minimum crew complement from 2 pilots to 3 pilots for long-haul flights. Add a note that both pilots must hold type ratings.`
+    const changes = [editInstructions || 'Updated crew complement from 2 to 3 pilots for long-haul flights; added type rating requirement']
+
     try {
-      addLog('Starting revision pipeline (load + edit + diff + apparatus)...')
-      const t0 = Date.now()
-      const pipelineRes = await fetch(`${API}/pipeline`, {
+      // ── Step 1: Load + Edit ──
+      const t1 = Date.now()
+      addLog('Step 1/3: Loading document + applying edits via SuperDocs API...')
+      setPreEditHtml(SAMPLE_HTML)
+
+      const loadEditRes = await fetch(`${API}/step/load-edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: sid,
           document_html: SAMPLE_HTML,
-          edit_instructions: editInstructions || `Update section 4.1: change minimum crew complement from 2 pilots to 3 pilots for long-haul flights. Add a note that both pilots must hold type ratings.`,
+          edit_instructions: instructions,
+        }),
+      })
+      if (!loadEditRes.ok) throw new Error(`Load+Edit failed: ${loadEditRes.statusText}`)
+      const loadEdit = await loadEditRes.json() as LoadEditResult
+      if (!loadEdit.success) throw new Error(loadEdit.errors.join(', '))
+
+      const t1Done = Date.now()
+      setStepTimers(prev => ({ ...prev, 'load-edit': t1Done - t1 }))
+      addLog(`Step 1 complete in ${timeSince(t1)} — ${loadEdit.ops_used} op(s). Response: "${loadEdit.response_text.slice(0, 80)}..."`)
+      setPostEditHtml(loadEdit.post_edit_html)
+      setTotalOps(loadEdit.ops_used)
+
+      // ── Step 2: Apparatus (diff + inject) ──
+      setPipelineStep('apparatus')
+      const t2 = Date.now()
+      addLog('Step 2/3: Running local diff + generating apparatus instructions...')
+
+      const appRes = await fetch(`${API}/step/apparatus`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sid,
+          pre_edit_html: SAMPLE_HTML,
+          post_edit_html: loadEdit.post_edit_html,
           revision_number: revisionNumber,
           date: date,
-          changes: [editInstructions || 'Updated crew complement from 2 to 3 pilots for long-haul flights; added type rating requirement'],
+          changes: changes,
           highlights_summary: 'Crew requirement increased from 2 to 3 for long-haul flights; type rating mandate added',
         }),
       })
-      if (!pipelineRes.ok) throw new Error(`Pipeline failed: ${pipelineRes.statusText}`)
-      const pipeline = await pipelineRes.json() as PipelineResult
-      const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
-      addLog(`Pipeline complete in ${elapsed}s: ${pipeline.changes_count} changes, ${pipeline.ops_used} ops`)
-      setOpsUsed(pipeline.ops_used)
-      setResult(pipeline)
+      if (!appRes.ok) throw new Error(`Apparatus failed: ${appRes.statusText}`)
+      const apparatus = await appRes.json() as ApparatusResult
+      if (!apparatus.success) throw new Error(apparatus.errors.join(', '))
 
-      addLog('Stamping headers and footers (1 op)...')
+      const t2Done = Date.now()
+      setStepTimers(prev => ({ ...prev, 'apparatus': t2Done - t2 }))
+      addLog(`Step 2 complete in ${timeSince(t2)} — ${apparatus.changes_count} changes, ${apparatus.ops_used} op(s), ${apparatus.apparatus_instructions.length} batch(es)`)
+      setDiffEntries(apparatus.diff_entries)
+      setApparatusInstructions(apparatus.apparatus_instructions)
+      setTotalOps(prev => prev + apparatus.ops_used)
+
+      // ── Step 3: Stamp ──
+      setPipelineStep('stamp')
+      const t3 = Date.now()
+      addLog('Step 3/3: Stamping headers and footers...')
+
       const stampRes = await fetch(`${API}/stamp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -136,19 +220,30 @@ function App() {
         }),
       })
       if (!stampRes.ok) throw new Error(`Stamp failed: ${stampRes.statusText}`)
-      const stamp = await stampRes.json()
-      addLog(`Header: ${stamp.header_text}`)
+      const stamp = await stampRes.json() as StampResult
+
+      const t3Done = Date.now()
+      setStepTimers(prev => ({ ...prev, 'stamp': t3Done - t3 }))
+      addLog(`Step 3 complete in ${timeSince(t3)} — 1 op. Header: ${stamp.header_text}`)
       addLog(`Footer: ${stamp.footer_text}`)
       setStampResult(stamp)
-      setOpsUsed(prev => prev + stamp.ops_used)
+      setTotalOps(prev => prev + stamp.ops_used)
+
+      setPipelineStep('done')
+      stopTimer()
+      const totalTime = ((t3Done - t1) / 1000).toFixed(1)
+      addLog(`All done in ${totalTime}s — ${totalOps + stamp.ops_used} total ops`)
       setStep('done')
-      addLog(`Total ops: ${pipeline.ops_used + stamp.ops_used} (pipeline ${pipeline.ops_used} + stamp ${stamp.ops_used})`)
     } catch (e) {
+      stopTimer()
       setError(String(e))
       setStep('error')
+      setPipelineStep('idle')
       addLog(`Error: ${e}`)
     }
   }
+
+  const formatMs = (ms: number) => ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`
 
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: 24, fontFamily: 'system-ui, sans-serif' }}>
@@ -175,11 +270,22 @@ function App() {
             placeholder="e.g. Update crew complement from 2 to 3 pilots for long-haul"
             style={{ width: '100%', minHeight: 60, padding: 8, borderRadius: 4, border: '1px solid #ccc', fontSize: 14, resize: 'vertical' }} />
         </div>
-        <button onClick={handleRun} disabled={step === 'running'}
-          style={{ padding: '10px 28px', borderRadius: 4, border: 'none', background: step === 'running' ? '#93c5fd' : '#2563eb', color: '#fff', cursor: step === 'running' ? 'wait' : 'pointer', fontSize: 14, fontWeight: 600 }}>
-          {step === 'running' ? 'Running...' : 'Run Pipeline'}
-        </button>
-        <span style={{ marginLeft: 16, color: '#666', fontSize: 13 }}>Total ops: {opsUsed}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <button onClick={handleRun} disabled={step === 'running'}
+            style={{ padding: '10px 28px', borderRadius: 4, border: 'none', background: step === 'running' ? '#93c5fd' : '#2563eb', color: '#fff', cursor: step === 'running' ? 'wait' : 'pointer', fontSize: 14, fontWeight: 600 }}>
+            {step === 'running' ? `Running ${pipelineStep}...` : 'Run Pipeline'}
+          </button>
+          {step === 'running' && (
+            <span style={{ color: '#666', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
+              {formatMs(elapsed)} elapsed
+            </span>
+          )}
+          {step === 'done' && (
+            <span style={{ color: '#16a34a', fontSize: 13, fontWeight: 600 }}>
+              Total: {totalOps} ops in {formatMs(elapsed)}
+            </span>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -188,52 +294,84 @@ function App() {
         </div>
       )}
 
-      {/* Log */}
+      {/* Live log */}
       {log.length > 0 && (
-        <div style={{ marginBottom: 16, background: '#1e293b', color: '#a5f3fc', padding: 12, borderRadius: 8, fontFamily: 'monospace', fontSize: 12, maxHeight: 120, overflow: 'auto' }}>
-          {log.map((line, i) => <div key={i}>{`> ${line}`}</div>)}
+        <div style={{ marginBottom: 16, background: '#1e293b', color: '#a5f3fc', padding: 12, borderRadius: 8, fontFamily: 'monospace', fontSize: 12, maxHeight: 200, overflow: 'auto' }}>
+          {log.map((entry, i) => (
+            <div key={i} style={{ display: 'flex', gap: 8 }}>
+              <span style={{ color: '#475569' }}>{String(i + 1).padStart(2, ' ')}</span>
+              <span>{`> ${entry.msg}`}</span>
+            </div>
+          ))}
+          {step === 'running' && <div style={{ color: '#fbbf24' }}>{'> '}{pipelineStep === 'load-edit' ? 'Waiting for SuperDocs API...' : pipelineStep === 'apparatus' ? 'Processing...' : 'Stamping...'}</div>}
         </div>
       )}
 
-      {/* Results */}
-      {result && (
+      {/* Progress steps */}
+      {step === 'running' && (
+        <div style={{ marginBottom: 20, display: 'flex', gap: 8 }}>
+          {(['load-edit', 'apparatus', 'stamp'] as const).map((s, i) => {
+            const isDone = ['apparatus', 'stamp', 'done'].includes(pipelineStep) && i === 0
+              || ['stamp', 'done'].includes(pipelineStep) && i === 1
+              || pipelineStep === 'done' && i === 2
+            const isCurrent = (pipelineStep === 'load-edit' && i === 0)
+              || (pipelineStep === 'apparatus' && i === 1)
+              || (pipelineStep === 'stamp' && i === 2)
+            return (
+              <div key={s} style={{
+                flex: 1, padding: '8px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, textAlign: 'center',
+                background: isDone ? '#f0fdf4' : isCurrent ? '#eff6ff' : '#f8f9fa',
+                border: `1px solid ${isDone ? '#bbf7d0' : isCurrent ? '#bfdbfe' : '#e9ecef'}`,
+                color: isDone ? '#166534' : isCurrent ? '#1e40af' : '#999',
+              }}>
+                {isDone ? '✓' : isCurrent ? '●' : '○'} {i + 1}. {s === 'load-edit' ? 'Load + Edit' : s === 'apparatus' ? 'Diff + Apparatus' : 'Stamp'}
+                {isDone && stepTimers[s] ? ` (${formatMs(stepTimers[s])})` : ''}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Results — appear progressively */}
+      {(postEditHtml || diffEntries.length > 0 || apparatusInstructions.length > 0 || stampResult) && (
         <div>
           {/* Summary cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
-            <div style={{ background: result.success ? '#f0fdf4' : '#fef2f2', borderRadius: 8, padding: 16, textAlign: 'center', border: `1px solid ${result.success ? '#bbf7d0' : '#fecaca'}` }}>
-              <div style={{ fontSize: 28, fontWeight: 700, color: result.success ? '#166534' : '#991b1b' }}>{result.changes_count}</div>
+            <div style={{ background: diffEntries.length > 0 ? '#f0fdf4' : '#f8f9fa', borderRadius: 8, padding: 16, textAlign: 'center', border: `1px solid ${diffEntries.length > 0 ? '#bbf7d0' : '#e9ecef'}` }}>
+              <div style={{ fontSize: 28, fontWeight: 700, color: diffEntries.length > 0 ? '#166534' : '#999' }}>{diffEntries.length}</div>
               <div style={{ fontSize: 12, color: '#666' }}>Changes Detected</div>
             </div>
             <div style={{ background: '#eff6ff', borderRadius: 8, padding: 16, textAlign: 'center', border: '1px solid #bfdbfe' }}>
-              <div style={{ fontSize: 28, fontWeight: 700, color: '#1e40af' }}>{opsUsed}</div>
+              <div style={{ fontSize: 28, fontWeight: 700, color: '#1e40af' }}>{totalOps}</div>
               <div style={{ fontSize: 12, color: '#666' }}>Total Operations</div>
             </div>
             <div style={{ background: '#f5f3ff', borderRadius: 8, padding: 16, textAlign: 'center', border: '1px solid #ddd6fe' }}>
-              <div style={{ fontSize: 28, fontWeight: 700, color: '#6d28d9' }}>{result.apparatus_instructions.length}</div>
+              <div style={{ fontSize: 28, fontWeight: 700, color: '#6d28d9' }}>{apparatusInstructions.length}</div>
               <div style={{ fontSize: 12, color: '#666' }}>Apparatus Batches</div>
             </div>
           </div>
 
           {/* Document before/after */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-            <DocumentPreview html={result.pre_edit_html} label="BEFORE (Original)" />
-            <DocumentPreview html={result.post_edit_html || result.pre_edit_html} label="AFTER (With Revisions)" />
-          </div>
+          {postEditHtml && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+              <DocumentPreview html={preEditHtml || SAMPLE_HTML} label="BEFORE (Original)" />
+              <DocumentPreview html={postEditHtml} label="AFTER (With Revisions)" />
+            </div>
+          )}
 
           {/* Diff */}
-          <div style={{ marginBottom: 20 }}>
-            <h3 style={{ marginTop: 0 }}>Document Diff</h3>
-            <div style={{ fontSize: 13, color: '#666', marginBottom: 8 }}>
-              Comparing {result.total_paragraphs_old} old paragraphs vs {result.total_paragraphs_new} new paragraphs
+          {diffEntries.length > 0 && (
+            <div style={{ marginBottom: 20 }}>
+              <h3 style={{ marginTop: 0 }}>Document Diff</h3>
+              <DiffView entries={diffEntries} />
             </div>
-            <DiffView entries={result.diff_entries} />
-          </div>
+          )}
 
           {/* Apparatus instructions */}
-          {result.apparatus_instructions.length > 0 && (
+          {apparatusInstructions.length > 0 && (
             <div style={{ marginBottom: 20 }}>
               <h3 style={{ marginTop: 0 }}>Apparatus Instructions Sent to SuperDocs</h3>
-              {result.apparatus_instructions.map((instr, i) => (
+              {apparatusInstructions.map((instr, i) => (
                 <div key={i} style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: 12, marginBottom: 8, fontSize: 13, lineHeight: 1.5 }}>
                   <div style={{ fontWeight: 600, marginBottom: 4, color: '#92400e' }}>Batch {i + 1}</div>
                   <div style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: 12 }}>{instr}</div>
@@ -258,14 +396,6 @@ function App() {
               </div>
             </div>
           )}
-
-          {/* Errors */}
-          {result.errors.length > 0 && (
-            <div style={{ marginTop: 16, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, padding: 12 }}>
-              <div style={{ fontWeight: 600, color: '#991b1b', marginBottom: 4 }}>Errors</div>
-              {result.errors.map((err, i) => <div key={i} style={{ fontSize: 13, color: '#991b1b' }}>{err}</div>)}
-            </div>
-          )}
         </div>
       )}
 
@@ -274,19 +404,17 @@ function App() {
         <h2 style={{ marginTop: 0, fontSize: 18 }}>How It Works</h2>
         <div style={{ fontSize: 13, lineHeight: 1.7, color: '#444' }}>
           <p><strong>Architecture:</strong> React Frontend → REST API → Python FastAPI Sidecar → SuperDocs REST API</p>
-          <p><strong>Pipeline steps (2 ops total):</strong></p>
+          <p><strong>Pipeline steps (3 sequential API calls):</strong></p>
           <ol style={{ paddingLeft: 20, marginTop: 4 }}>
-            <li><strong>Load + Edit (1 op):</strong> Document HTML is loaded into a SuperDocs session and edit instructions are applied in a single API call. SuperDocs returns the modified document.</li>
-            <li><strong>Diff (0 ops):</strong> The sidecar compares pre-edit vs post-edit HTML locally — no API cost. Produces paragraph-level change list.</li>
-            <li><strong>Apparatus Injection (1 op per batch):</strong> Change bars, revision-record table, and highlights-of-change are sent as chat instructions. Each batch is one API call (max 25 paragraphs per batch).</li>
-            <li><strong>Header/Footer Stamp (1 op):</strong> Revision number + date stamped on every page via a single chat instruction.</li>
+            <li><strong>Load + Edit (1 op, ~5-15s):</strong> Document HTML is loaded into a SuperDocs session and edit instructions are applied in a single API call. This is the slow step — SuperDocs processes the document on their servers.</li>
+            <li><strong>Diff + Apparatus (1+ ops, ~1s):</strong> The sidecar compares pre-edit vs post-edit HTML locally (fast). Then sends change bars, revision-record table, and highlights as chat instructions.</li>
+            <li><strong>Stamp (1 op, ~3-5s):</strong> Revision number + date stamped on headers/footers via a single chat instruction.</li>
           </ol>
-          <p style={{ marginTop: 12 }}><strong>Example result:</strong></p>
+          <p style={{ marginTop: 12 }}><strong>Typical result:</strong></p>
           <ul style={{ paddingLeft: 20, marginTop: 4 }}>
             <li>Input: 13-paragraph FCOM document + edit "change crew from 2 to 3 pilots"</li>
-            <li>Output: 1 modified paragraph (position 3), 1 apparatus batch (change bars + record table + highlights)</li>
-            <li>Ops: 1 (load+edit) + 1 (apparatus) + 1 (stamp) = <strong>3 total</strong></li>
-            <li>Time: ~3-5 seconds (2 sequential API calls)</li>
+            <li>Output: 1 modified paragraph, 1 apparatus batch (change bars + record table + highlights)</li>
+            <li>Total: 3 ops, ~10-20s (mostly SuperDocs API latency)</li>
           </ul>
         </div>
       </div>

@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from build_a.apparatus import RevisionMetadata
+from build_a.apparatus import RevisionApparatus, RevisionMetadata
 from build_a.client import AuthError, SuperDocsClient, SuperDocsError
 from build_a.differ import DocDiffer
 from build_a.headers import ControlledExporter, HeaderFooterStamper
@@ -90,6 +90,128 @@ class ExportResponse(BaseModel):
 class AccountInfo(BaseModel):
     info: dict
     sessions: list[dict]
+
+
+# ── Step-by-step endpoints ────────────────────────────────────────────────
+
+
+class LoadEditRequest(BaseModel):
+    session_id: str
+    document_html: str
+    edit_instructions: str
+
+
+class LoadEditResponse(BaseModel):
+    success: bool
+    ops_used: int
+    post_edit_html: str
+    response_text: str
+    errors: list[str] = []
+
+
+@app.post("/api/step/load-edit", response_model=LoadEditResponse)
+async def step_load_edit(req: LoadEditRequest) -> LoadEditResponse:
+    """Step 1: Load document + apply edit instructions (1 API call, 1 op)."""
+    try:
+        async with SuperDocsClient() as client:
+            resp = await client.start_session(
+                req.document_html, req.session_id, message=req.edit_instructions,
+            )
+            post_html = ""
+            doc_changes = resp.document_changes
+            if doc_changes and doc_changes.updated_html:
+                post_html = doc_changes.updated_html
+            elif resp.response:
+                # Try to extract from response if no document_changes
+                history = await client.get_session_history(req.session_id)
+                if history.document_html:
+                    post_html = history.document_html
+            return LoadEditResponse(
+                success=True,
+                ops_used=client.tracker.total_ops,
+                post_edit_html=post_html,
+                response_text=resp.response or "",
+            )
+    except SuperDocsError as e:
+        return LoadEditResponse(
+            success=False, ops_used=0, post_edit_html="", response_text="", errors=[str(e)],
+        )
+
+
+class ApparatusRequest(BaseModel):
+    session_id: str
+    pre_edit_html: str
+    post_edit_html: str
+    revision_number: str
+    date: str
+    changes: list[str] = []
+    highlights_summary: str = ""
+
+
+class ApparatusResponse(BaseModel):
+    success: bool
+    ops_used: int
+    changes_count: int
+    apparatus_instructions: list[str]
+    diff_entries: list[DiffEntry] = []
+    total_paragraphs_old: int = 0
+    total_paragraphs_new: int = 0
+    errors: list[str] = []
+
+
+@app.post("/api/step/apparatus", response_model=ApparatusResponse)
+async def step_apparatus(req: ApparatusRequest) -> ApparatusResponse:
+    """Step 2-3: Diff + generate and send apparatus instructions."""
+    try:
+        differ = DocDiffer()
+        diff = differ.diff(req.pre_edit_html, req.post_edit_html)
+
+        if not diff.has_changes:
+            return ApparatusResponse(
+                success=True, ops_used=0, changes_count=0,
+                apparatus_instructions=[], total_paragraphs_old=diff.total_paragraphs_old,
+                total_paragraphs_new=diff.total_paragraphs_new,
+            )
+
+        metadata = RevisionMetadata(
+            revision_number=req.revision_number,
+            date=req.date,
+            changes=req.changes,
+            highlights_summary=req.highlights_summary,
+        )
+        apparatus = RevisionApparatus()
+        instructions = apparatus.generate_combined(diff, metadata)
+
+        async with SuperDocsClient() as client:
+            apparatus_ops = 0
+            for instruction in instructions:
+                try:
+                    await client.edit(instruction, req.session_id)
+                    apparatus_ops += 1
+                except SuperDocsError as e:
+                    return ApparatusResponse(
+                        success=False, ops_used=apparatus_ops, changes_count=len(diff.changed),
+                        apparatus_instructions=instructions, errors=[str(e)],
+                    )
+
+            diff_entries = [
+                DiffEntry(
+                    position=d.position, change_type=d.change_type.value,
+                    old_text=d.old_text, new_text=d.new_text,
+                )
+                for d in diff.changed
+            ]
+            return ApparatusResponse(
+                success=True, ops_used=apparatus_ops, changes_count=len(diff.changed),
+                apparatus_instructions=instructions, diff_entries=diff_entries,
+                total_paragraphs_old=diff.total_paragraphs_old,
+                total_paragraphs_new=diff.total_paragraphs_new,
+            )
+    except Exception as e:
+        return ApparatusResponse(
+            success=False, ops_used=0, changes_count=0,
+            apparatus_instructions=[], errors=[str(e)],
+        )
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────
