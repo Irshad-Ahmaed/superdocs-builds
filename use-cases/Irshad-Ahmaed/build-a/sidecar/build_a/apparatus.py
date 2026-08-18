@@ -45,13 +45,13 @@ def _build_record_table_instruction(metadata: RevisionMetadata) -> str:
             f"Row: | {metadata.revision_number} | {metadata.date} | No content changes |"
         )
     change_rows = "\n".join(
-        f"| {i + 1} | {c} |" for i, c in enumerate(metadata.changes)
+        f"| {metadata.revision_number} | {metadata.date} | {c} |"
+        for c in metadata.changes
     )
     return (
         f"Insert a revision-record table at the top of the document with these columns: "
         f"Revision Number, Date, Summary of Change.\n"
-        f"Row: | {metadata.revision_number} | {metadata.date} | ... |\n"
-        f"Use the following change summaries:\n{change_rows}"
+        f"Use the following rows:\n{change_rows}"
     )
 
 

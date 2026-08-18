@@ -114,7 +114,7 @@ class SessionInfo(BaseModel):
 
 class SessionHistory(BaseModel):
     session_id: str
-    messages: list[dict[str, Any]] = Field(default_factory=list)
+    entries: list[dict[str, Any]] = Field(default_factory=list)
     document_state: dict[str, Any] | None = None
     editor_action: str = "keep"
 
@@ -209,16 +209,18 @@ class SuperDocsClient:
         self,
         document_html: str,
         session_id: str,
-        message: str | None = None,
+        message: str = "Load this document.",
     ) -> ChatResponse:
         """Start a session and load a document (1 op).
 
         The first request with a new session_id starts the session and loads
-        the document. Pass message=None to load without triggering an instruction.
+        the document. message is required by the API and defaults to a load instruction.
         """
-        payload: dict[str, Any] = {"session_id": session_id, "document_html": document_html}
-        if message:
-            payload["message"] = message
+        payload: dict[str, Any] = {
+            "session_id": session_id,
+            "document_html": document_html,
+            "message": message,
+        }
         resp = await self._post("/v1/chat", payload)
         self.tracker.record("start_session", 1, f"session={session_id}")
         return ChatResponse.model_validate(resp)
@@ -283,6 +285,7 @@ class SuperDocsClient:
         payload = {
             "session_id": session_id,
             "message": message,
+            "async_mode": True,
             "approval_mode": approval_mode,
         }
         resp = await self._post("/v1/chat/async", payload)
@@ -309,11 +312,11 @@ class SuperDocsClient:
         self.tracker.record("continue_prompt", 0, f"continue={should_continue}")
         return resp
 
-    async def rename_document(self, document_id: str, title: str) -> dict[str, Any]:
+    async def rename_document(self, session_id: str, title: str) -> dict[str, Any]:
         """Rename a document (0 ops). Note: for renaming ONLY — headers/footers via chat."""
         payload = {"title": title}
-        resp = await self._patch(f"/v1/documents/{document_id}", payload)
-        self.tracker.record("rename_document", 0, f"doc={document_id}")
+        resp = await self._post(f"/v1/sessions/{session_id}/rename", payload)
+        self.tracker.record("rename_document", 0, f"session={session_id}")
         return resp
 
     async def save_document(self, session_id: str, document_id: str) -> dict[str, Any]:
@@ -420,9 +423,6 @@ class SuperDocsClient:
     ) -> dict[str, Any]:
         return await self._request_with_retry("GET", path, params=params)
 
-    async def _patch(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return await self._request_with_retry("PATCH", path, json=payload)
-
     async def _request_with_retry(
         self,
         method: str,
@@ -441,8 +441,9 @@ class SuperDocsClient:
                     logger.warning(
                         "Rate limited, retrying in %.1fs (attempt %d)", wait, attempt + 1
                     )
-                    await asyncio.sleep(wait)
                     last_exc = RateLimitError(f"Rate limited after {max_retries} retries")
+                    if attempt < max_retries:
+                        await asyncio.sleep(wait)
                     continue
                 resp.raise_for_status()
                 return resp.json()

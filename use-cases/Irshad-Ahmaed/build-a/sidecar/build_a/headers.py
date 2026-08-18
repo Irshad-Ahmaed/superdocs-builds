@@ -10,6 +10,8 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+import httpx
+
 from .client import SuperDocsClient, SuperDocsError
 
 logger = logging.getLogger(__name__)
@@ -107,8 +109,8 @@ class ControlledExporter:
                     pdf_path=output_path,
                     download_url=result.download_url,
                 )
-        except SuperDocsError:
-            pass
+        except SuperDocsError as exc:
+            logger.warning("Direct export failed, trying fallback: %s", exc)
 
         # Fallback: pre-signed download URL
         dl = await self.client.request_download(session_id, format="pdf")
@@ -120,8 +122,13 @@ class ControlledExporter:
         )
 
     async def _download(self, url: str, dest: Path) -> None:
-        """Download a file from a URL and write to disk."""
-        resp = await self.client._client.get(url)
-        resp.raise_for_status()
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(resp.content)
+        """Download a file from a URL and write to disk.
+
+        Uses a separate httpx client without auth headers — pre-signed URLs
+        must not carry Bearer tokens.
+        """
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(resp.content)

@@ -2,18 +2,18 @@
 
 Run:
     cd sidecar
-    set SUPERDOCS_API_KEY=your_superdocs_api_key_placeholder_
     uvicorn server:app --reload --port 8000
 """
 
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from build_a.apparatus import RevisionMetadata
 from build_a.client import AuthError, SuperDocsClient, SuperDocsError
@@ -27,7 +27,7 @@ app = FastAPI(title="SuperDocs Build A", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173", "http://localhost:5174"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -45,12 +45,24 @@ class PipelineRequest(BaseModel):
     highlights_summary: str = ""
 
 
+class DiffEntry(BaseModel):
+    position: int
+    change_type: str
+    old_text: str
+    new_text: str
+
+
 class PipelineResponse(BaseModel):
     success: bool
     ops_used: int
     changes_count: int
     apparatus_instructions: list[str]
     errors: list[str]
+    diff_entries: list[DiffEntry] = []
+    total_paragraphs_old: int = 0
+    total_paragraphs_new: int = 0
+    pre_edit_html: str = ""
+    post_edit_html: str = ""
 
 
 class StampRequest(BaseModel):
@@ -123,12 +135,26 @@ async def run_pipeline(req: PipelineRequest) -> PipelineResponse:
                 edit_instructions=req.edit_instructions,
                 metadata=metadata,
             )
+            diff_entries = [
+                DiffEntry(
+                    position=d.position,
+                    change_type=d.change_type.value,
+                    old_text=d.old_text,
+                    new_text=d.new_text,
+                )
+                for d in result.diff.changed
+            ]
             return PipelineResponse(
                 success=result.success,
                 ops_used=result.ops_used,
                 changes_count=len(result.diff.changed),
                 apparatus_instructions=result.apparatus_instructions,
                 errors=result.errors,
+                diff_entries=diff_entries,
+                total_paragraphs_old=result.diff.total_paragraphs_old,
+                total_paragraphs_new=result.diff.total_paragraphs_new,
+                pre_edit_html=req.document_html,
+                post_edit_html=result.post_edit_html,
             )
     except SuperDocsError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
@@ -156,7 +182,7 @@ async def export_pdf(req: ExportRequest) -> ExportResponse:
     try:
         async with SuperDocsClient() as client:
             exporter = ControlledExporter(client)
-            result = await exporter.export_pdf(req.session_id, Path(req.output_path))
+            result = await exporter.export_pdf(req.session_id, Path(req.output_path).resolve())
             return ExportResponse(
                 pdf_path=str(result.pdf_path),
                 download_url=result.download_url,
@@ -165,13 +191,16 @@ async def export_pdf(req: ExportRequest) -> ExportResponse:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
 
+class DiffRequest(BaseModel):
+    old_html: str = ""
+    new_html: str = ""
+
+
 @app.post("/api/diff")
-async def diff_documents(body: dict) -> dict:
+async def diff_documents(body: DiffRequest) -> dict:
     """Diff two HTML documents (no API cost — local only)."""
-    old_html = body.get("old_html", "")
-    new_html = body.get("new_html", "")
     differ = DocDiffer()
-    diff = differ.diff(old_html, new_html)
+    diff = differ.diff(body.old_html, body.new_html)
     return {
         "has_changes": diff.has_changes,
         "changes_count": len(diff.changed),
@@ -193,16 +222,23 @@ async def diff_documents(body: dict) -> dict:
 
 
 class ExportReportRequest(BaseModel):
-    session_id: str
-    volume: int
-    hours: float
-    hourly_cost: float
-    infrastructure_monthly: float = 100.0
-    horizon_years: int = 3
+    session_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,128}$")
+    volume: int = Field(ge=1, le=1_000_000)
+    hours: float = Field(ge=0, le=100_000)
+    hourly_cost: float = Field(ge=0, le=10_000)
+    infrastructure_monthly: float = Field(default=100.0, ge=0, le=50_000)
+    horizon_years: int = Field(default=3, ge=1, le=10)
 
 
-@app.post("/api/export-report")
-async def export_report(req: ExportReportRequest) -> dict:
+class ExportReportResponse(BaseModel):
+    pdf_path: str
+    html_length: int
+    html: str
+    pdf_data_url: str
+
+
+@app.post("/api/export-report", response_model=ExportReportResponse)
+async def export_report(req: ExportReportRequest) -> ExportReportResponse:
     """Generate ROI report via SuperDocs and export as PDF."""
     try:
         from build_b.calculator import CalculatorInputs, ReportGenerator, compute_tco
@@ -219,8 +255,18 @@ async def export_report(req: ExportReportRequest) -> dict:
         async with SuperDocsClient() as client:
             gen = ReportGenerator(client)
             html = await gen.generate_report(req.session_id, results)
-            path = await gen.export_report(req.session_id, Path(f"reports/{req.session_id}.pdf"))
-            return {"pdf_path": str(path), "html_length": len(html)}
+            reports_dir = Path("reports").resolve()
+            reports_dir.mkdir(exist_ok=True)
+            pdf_path = reports_dir / f"{req.session_id}.pdf"
+            path = await gen.export_report(req.session_id, pdf_path)
+            pdf_bytes = path.read_bytes()
+            pdf_b64 = base64.b64encode(pdf_bytes).decode()
+            return ExportReportResponse(
+                pdf_path=str(path),
+                html_length=len(html),
+                html=html,
+                pdf_data_url=f"data:application/pdf;base64,{pdf_b64}",
+            )
     except SuperDocsError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     except ValueError as e:

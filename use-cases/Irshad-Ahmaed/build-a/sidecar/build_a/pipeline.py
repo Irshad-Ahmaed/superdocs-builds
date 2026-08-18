@@ -31,6 +31,7 @@ class PipelineResult:
     approval_results: list[dict[str, Any]] = field(default_factory=list)
     ops_used: int = 0
     errors: list[str] = field(default_factory=list)
+    post_edit_html: str = ""
 
     @property
     def success(self) -> bool:
@@ -117,6 +118,7 @@ class RevisionPipeline:
 
         # Step 3: Get post-edit HTML
         post_edit_html = await self._get_post_edit_html(session_id, edit_result)
+        result.post_edit_html = post_edit_html
 
         # Step 4: Diff
         result.diff = self.differ.diff(pre_edit_html, post_edit_html)
@@ -246,7 +248,7 @@ class RevisionPipeline:
             history = await self.client.get_session_history(session_id)
             if history.document_html:
                 return history.document_html
-        except SuperDocsError:
-            pass
+        except SuperDocsError as exc:
+            logger.warning("Failed to fetch session history for pre-edit HTML: %s", exc)
 
         return ""  # worst case: empty, diff will show everything as added

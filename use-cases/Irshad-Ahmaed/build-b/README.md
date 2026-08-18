@@ -8,12 +8,14 @@ Self-serve TCO calculator comparing in-house AI document pipeline costs against 
 
 ## Architecture
 
+Build B piggybacks on Build A's FastAPI sidecar. The `/api/export-report` endpoint in Build A's `server.py` lazily imports `build_b.calculator` to run the ROI calculation and export.
+
 ```
-React Frontend (Vite + TypeScript)
-    ↕ REST API
-Python FastAPI Sidecar
-    ↕ HTTP
-SuperDocs REST API
+React Frontend (Vite + TypeScript, port 5174)
+    ↕ REST API (proxied to localhost:8000)
+Python FastAPI Sidecar (Build A's server.py)
+    ↕ lazy import
+build_b.calculator → SuperDocs REST API
 ```
 
 ## Calculator model
@@ -27,7 +29,7 @@ SuperDocs REST API
 ```bash
 cd sidecar
 python -m venv .venv && .venv\Scripts\activate
-pip install -r requirements.txt -r requirements-dev.txt
+pip install -e ".[dev]"
 
 cd ../frontend
 npm install
@@ -36,4 +38,4 @@ npm run dev
 
 ## Operation budget
 
-1 op per PDF download. Free tier allows 500 downloads.
+1 op per report generation (PDF export is free). Free tier allows 500 reports.

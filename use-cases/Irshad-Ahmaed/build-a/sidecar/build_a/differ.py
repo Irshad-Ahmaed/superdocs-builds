@@ -58,16 +58,21 @@ def extract_paragraphs(html: str) -> list[tuple[str, str | None]]:
 
     Captures block-level text elements plus any direct text children of body
     that aren't inside a block element (handles SuperDocs-generated HTML where
-    content may sit directly under body).
+    content may sit directly under body). Avoids double-counting nested blocks
+    (e.g. <div><p>text</p></div> only counts the inner <p>).
     """
     soup = BeautifulSoup(html, "html.parser")
     block_tags = {
         "p", "h1", "h2", "h3", "h4", "h5", "h6",
-        "li", "td", "th", "div", "blockquote",
+        "li", "td", "th", "blockquote",
     }
+    container_tags = {"div", "section", "article", "main", "aside", "nav", "header", "footer"}
     results: list[tuple[str, str | None]] = []
 
-    for el in soup.find_all(list(block_tags)):
+    for el in soup.find_all(list(block_tags | container_tags)):
+        # Skip containers — only extract leaf block elements
+        if el.name in container_tags and el.find(list(block_tags)):
+            continue
         text = el.get_text(strip=True)
         if not text:
             continue
@@ -120,23 +125,35 @@ def diff_paragraphs(
         if op == "equal":
             continue
         elif op == "replace":
-            count = max(i2 - i1, j2 - j1)
-            for k in range(count):
-                pos = i1 + k if i1 + k < i2 else j1 + (k - (i2 - i1))
-                old_text = old_texts[i1 + k] if i1 + k < i2 else ""
-                new_text = new_texts[j1 + k] if j1 + k < j2 else ""
-                if j1 + k < j2:
-                    chunk_id = new_chunks[j1 + k]
-                elif i1 + k < i2:
-                    chunk_id = old_chunks[i1 + k]
-                else:
-                    chunk_id = None
+            old_count = i2 - i1
+            new_count = j2 - j1
+            # Pair up the overlapping portion as modified
+            paired = min(old_count, new_count)
+            for k in range(paired):
                 diffs.append(ParagraphDiff(
-                    position=pos,
+                    position=i1 + k,
                     change_type=ChangeType.MODIFIED,
-                    old_text=old_text,
-                    new_text=new_text,
-                    chunk_id=chunk_id,
+                    old_text=old_texts[i1 + k],
+                    new_text=new_texts[j1 + k],
+                    chunk_id=new_chunks[j1 + k],
+                ))
+            # Extra old paragraphs beyond the new count are removed
+            for k in range(paired, old_count):
+                diffs.append(ParagraphDiff(
+                    position=i1 + k,
+                    change_type=ChangeType.REMOVED,
+                    old_text=old_texts[i1 + k],
+                    new_text="",
+                    chunk_id=old_chunks[i1 + k],
+                ))
+            # Extra new paragraphs beyond the old count are added
+            for k in range(paired, new_count):
+                diffs.append(ParagraphDiff(
+                    position=j1 + k,
+                    change_type=ChangeType.ADDED,
+                    old_text="",
+                    new_text=new_texts[j1 + k],
+                    chunk_id=new_chunks[j1 + k],
                 ))
         elif op == "insert":
             for k in range(j1, j2):
