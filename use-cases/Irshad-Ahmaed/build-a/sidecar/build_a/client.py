@@ -181,7 +181,7 @@ class SuperDocsClient:
         self,
         api_key: str | None = None,
         base_url: str = SUPERDOCS_BASE_URL,
-        timeout: float = 60.0,
+        timeout: float = 180.0,
     ) -> None:
         self.api_key = api_key or os.environ.get("SUPERDOCS_API_KEY", "")
         if not self.api_key:
@@ -191,7 +191,7 @@ class SuperDocsClient:
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
             headers={"Authorization": f"Bearer {self.api_key}"},
-            timeout=timeout,
+            timeout=httpx.Timeout(timeout, connect=10.0),
         )
 
     async def close(self) -> None:
@@ -455,7 +455,7 @@ class SuperDocsClient:
         self,
         method: str,
         path: str,
-        max_retries: int = 3,
+        max_retries: int = 2,
         **kwargs: Any,
     ) -> dict[str, Any]:
         last_exc: Exception | None = None
@@ -480,7 +480,9 @@ class SuperDocsClient:
             except httpx.TimeoutException as exc:
                 last_exc = SuperDocsTimeoutError(f"Request timed out: {exc}")
                 logger.warning("Timeout on %s %s (attempt %d)", method, path, attempt + 1)
-                continue
+                if attempt < max_retries:
+                    continue
+                break
             except httpx.HTTPStatusError as exc:
                 last_exc = SuperDocsError(f"HTTP {exc.response.status_code}: {exc.response.text}")
                 break
