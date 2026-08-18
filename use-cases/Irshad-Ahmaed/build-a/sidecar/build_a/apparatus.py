@@ -23,7 +23,7 @@ class RevisionMetadata:
 MAX_SECTIONS_PER_TURN = 25
 
 
-def _build_change_bars_instruction(positions: list[int], total: int) -> str:
+def _build_change_bars_instruction(positions: list[int]) -> str:
     """Build a chat instruction to add change bars next to altered paragraphs."""
     if not positions:
         return ""
@@ -104,7 +104,7 @@ class RevisionApparatus:
             for i in range(0, len(positions), MAX_SECTIONS_PER_TURN):
                 chunk = positions[i : i + MAX_SECTIONS_PER_TURN]
                 batch = InstructionBatch(instructions=[
-                    _build_change_bars_instruction(chunk, len(positions)),
+                    _build_change_bars_instruction(chunk),
                 ])
                 batches.append(batch)
 

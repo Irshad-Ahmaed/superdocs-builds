@@ -139,12 +139,7 @@ class RevisionPipeline:
         for instruction in instructions:
             try:
                 resp = await self.client.edit(instruction, session_id)
-                dumped = (
-                    resp.model_dump()
-                    if hasattr(resp, "model_dump")
-                    else {"response": resp.response}
-                )
-                result.apparatus_responses.append(dumped)
+                result.apparatus_responses.append(resp.model_dump())
             except SuperDocsError as e:
                 result.errors.append(f"Apparatus injection: {e}")
 
@@ -160,9 +155,7 @@ class RevisionPipeline:
         """Apply edits synchronously (1 op)."""
         try:
             resp = await self.client.edit(edit_instructions, session_id)
-            result.edit_response = (
-                resp.model_dump() if hasattr(resp, "model_dump") else {"response": resp.response}
-            )
+            result.edit_response = resp.model_dump()
             return result.edit_response
         except SuperDocsError as e:
             result.errors.append(f"Step 2 (edit): {e}")
