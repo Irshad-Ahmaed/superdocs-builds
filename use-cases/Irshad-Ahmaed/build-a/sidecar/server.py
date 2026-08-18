@@ -8,7 +8,6 @@ Run:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -101,9 +100,9 @@ async def get_account() -> AccountInfo:
                 sessions=[s.model_dump() for s in sessions],
             )
     except AuthError as e:
-        raise HTTPException(status_code=401, detail=str(e))
+        raise HTTPException(status_code=401, detail=str(e)) from e
     except SuperDocsError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 @app.post("/api/pipeline", response_model=PipelineResponse)
@@ -132,7 +131,7 @@ async def run_pipeline(req: PipelineRequest) -> PipelineResponse:
                 errors=result.errors,
             )
     except SuperDocsError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 @app.post("/api/stamp", response_model=StampResponse)
@@ -148,7 +147,7 @@ async def stamp_headers(req: StampRequest) -> StampResponse:
                 ops_used=result.ops_used,
             )
     except SuperDocsError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 @app.post("/api/export", response_model=ExportResponse)
@@ -163,7 +162,7 @@ async def export_pdf(req: ExportRequest) -> ExportResponse:
                 download_url=result.download_url,
             )
     except SuperDocsError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 @app.post("/api/diff")
@@ -223,6 +222,6 @@ async def export_report(req: ExportReportRequest) -> dict:
             path = await gen.export_report(req.session_id, Path(f"reports/{req.session_id}.pdf"))
             return {"pdf_path": str(path), "html_length": len(html)}
     except SuperDocsError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e)) from e
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e

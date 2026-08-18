@@ -243,12 +243,7 @@ class RevisionPipeline:
         """Get post-edit HTML from edit response or session history."""
         # Try to get from edit response first
         doc_changes = edit_response.get("document_changes") or edit_response
-        if isinstance(doc_changes, dict):
-            updated = doc_changes.get("updated_html")
-        elif hasattr(doc_changes, "updated_html"):
-            updated = doc_changes.updated_html
-        else:
-            updated = None
+        updated = doc_changes.get("updated_html") if isinstance(doc_changes, dict) else None
         if updated:
             return updated
 
