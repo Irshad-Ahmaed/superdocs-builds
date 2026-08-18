@@ -39,16 +39,26 @@ class ModelFailureError(SuperDocsError):
 # --- Response models ---
 
 
-class DocumentChange(BaseModel):
-    chunk_id: str | None = None
+class DocumentChanges(BaseModel):
+    """Document modifications produced by the AI assistant."""
+
     updated_html: str | None = None
-    proposed_change: Any = None
+    version_id: str | None = None
+    changes_summary: str | None = None
+    requires_approval: bool | None = None
+    pending_changes: list[dict[str, Any]] | None = None
+    changes: list[dict[str, Any]] | None = None
+    chunk_diffs: list[dict[str, Any]] | None = None
 
 
 class ChatResponse(BaseModel):
-    message: str | None = None
-    document_changes: DocumentChange | None = None
+    """AI response with optional document changes and usage data."""
+
+    response: str
+    session_id: str
+    document_changes: DocumentChanges | None = None
     usage: dict[str, Any] | None = None
+    hint: dict[str, Any] | None = None
 
 
 class ExportResponse(BaseModel):
@@ -56,35 +66,82 @@ class ExportResponse(BaseModel):
     format: str | None = None
 
 
+class JobResult(BaseModel):
+    """Job result data for completed async jobs."""
+
+    response: str | None = None
+    session_id: str | None = None
+    document_changes: DocumentChanges | None = None
+    usage: dict[str, Any] | None = None
+    attachment_id: str | None = None
+
+
+class JobMetadata(BaseModel):
+    """Job metadata — contents vary by job type."""
+
+    message: str | None = None
+    pending_changes: list[dict[str, Any]] | None = None
+    intermediate_responses: list[dict[str, Any]] | None = None
+
+
 class JobStatus(BaseModel):
+    """Status and details of an async job (GET /v1/jobs/{job_id})."""
+
     job_id: str
-    status: str  # "running", "awaiting_approval", "completed", "failed"
-    document_changes: DocumentChange | None = None
-    pending_approvals: list[dict[str, Any]] | None = None
+    session_id: str
+    job_type: str
+    status: str  # "pending", "in_progress", "awaiting_approval", "completed", "failed", "cancelled"
+    created_at: str
+    updated_at: str
+    progress: int
+    organization_id: str | None = None
+    user_id: str | None = None
+    result: JobResult | None = None
     error: str | None = None
+    metadata: JobMetadata | None = None
 
 
 class SessionInfo(BaseModel):
+    """Summary of a document editing session."""
+
     session_id: str
-    created_at: str | None = None
-    last_active: str | None = None
+    created_at: str
+    last_activity: str
+    message_count: int
+    preview: str
+    user_id: str | None = None
 
 
 class SessionHistory(BaseModel):
     session_id: str
     messages: list[dict[str, Any]] = Field(default_factory=list)
-    document_html: str | None = None
+    document_state: dict[str, Any] | None = None
+    editor_action: str = "keep"
+
+    @property
+    def document_html(self) -> str | None:
+        """Extract html_content from the document_state nested object."""
+        if self.document_state and isinstance(self.document_state, dict):
+            return self.document_state.get("html_content")
+        return None
 
 
 class UploadResponse(BaseModel):
     upload_id: str
     upload_url: str
-    expires_at: str | None = None
+    expires_at: str
+    expires_in_seconds: int
+    max_size_bytes: int
+    curl_example: str
 
 
 class DownloadResponse(BaseModel):
     download_url: str
-    expires_at: str | None = None
+    expires_at: str
+    expires_in_seconds: int
+    curl_example: str
+    filename: str
+    format: str
 
 
 class AttachmentStatus(BaseModel):
@@ -180,16 +237,23 @@ class SuperDocsClient:
     async def approve(
         self,
         session_id: str,
-        chunk_id: str,
+        job_id: str,
         approved: bool,
+        change_id: str | None = None,
         feedback: str | None = None,
     ) -> dict[str, Any]:
-        """Approve or deny a proposed change (0 ops)."""
-        payload = {"chunk_id": chunk_id, "approved": approved}
+        """Approve or deny a proposed change (0 ops).
+
+        Requires job_id (the async job awaiting approval) and approved (bool).
+        Optionally pass change_id for a specific change, or omit to act on all.
+        """
+        payload: dict[str, Any] = {"job_id": job_id, "approved": approved}
+        if change_id:
+            payload["change_id"] = change_id
         if feedback:
             payload["feedback"] = feedback
         resp = await self._post(f"/v1/chat/{session_id}/approve", payload)
-        self.tracker.record("approve", 0, f"chunk={chunk_id} approved={approved}")
+        self.tracker.record("approve", 0, f"job={job_id} approved={approved}")
         return resp
 
     async def export(
@@ -273,19 +337,26 @@ class SuperDocsClient:
         return resp
 
     async def list_sessions(self) -> list[SessionInfo]:
-        """List active sessions (0 ops)."""
+        """List active sessions (0 ops).
+
+        API returns {sessions: [...], total: N}.
+        """
         resp = await self._get("/v1/sessions")
         self.tracker.record("list_sessions", 0)
-        sessions = resp if isinstance(resp, list) else resp.get("sessions", [])
+        sessions = resp.get("sessions", []) if isinstance(resp, dict) else resp
         return [SessionInfo.model_validate(s) for s in sessions]
 
     async def get_session_history(
         self, session_id: str, include_document_html: bool = True
     ) -> SessionHistory:
-        """Restore session history, optionally with full document HTML (0 ops)."""
-        params = {}
-        if include_document_html:
-            params["include_document_html"] = "true"
+        """Restore session history, optionally with full document HTML (0 ops).
+
+        API returns {session_id, messages, document_state: {html_content, ...}, editor_action}.
+        The document_html is accessed via session_history.document_html property.
+        """
+        params: dict[str, Any] = {}
+        if not include_document_html:
+            params["include_document_html"] = "false"
         resp = await self._get(f"/v1/sessions/{session_id}/history", params=params)
         self.tracker.record("get_session_history", 0, f"session={session_id}")
         return SessionHistory.model_validate(resp)

@@ -108,7 +108,8 @@ async def test_generate_report_sends_exact_values() -> None:
     async with SuperDocsClient(api_key=TEST_API_KEY) as client:
         respx.post("https://api.superdocs.app/v1/chat").mock(
             return_value=httpx.Response(200, json={
-                "message": "Report generated",
+                "response": "Report generated",
+                "session_id": "roi-test",
                 "document_changes": {
                     "updated_html": "<h1>ROI Report</h1>",
                 },

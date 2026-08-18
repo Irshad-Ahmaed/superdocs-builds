@@ -139,9 +139,12 @@ class RevisionPipeline:
         for instruction in instructions:
             try:
                 resp = await self.client.edit(instruction, session_id)
-                result.apparatus_responses.append(
-                    resp.model_dump() if hasattr(resp, "model_dump") else {"message": resp.message}
+                dumped = (
+                    resp.model_dump()
+                    if hasattr(resp, "model_dump")
+                    else {"response": resp.response}
                 )
+                result.apparatus_responses.append(dumped)
             except SuperDocsError as e:
                 result.errors.append(f"Apparatus injection: {e}")
 
@@ -158,7 +161,7 @@ class RevisionPipeline:
         try:
             resp = await self.client.edit(edit_instructions, session_id)
             result.edit_response = (
-                resp.model_dump() if hasattr(resp, "model_dump") else {"message": resp.message}
+                resp.model_dump() if hasattr(resp, "model_dump") else {"response": resp.response}
             )
             return result.edit_response
         except SuperDocsError as e:
@@ -198,8 +201,8 @@ class RevisionPipeline:
 
             if status.status == "completed":
                 return (
-                    status.document_changes.model_dump()
-                    if status.document_changes
+                    status.result.document_changes.model_dump()
+                    if status.result and status.result.document_changes
                     else {}
                 )
 
@@ -207,9 +210,10 @@ class RevisionPipeline:
                 result.errors.append(f"Step 2 (async_edit): {status.error or 'unknown failure'}")
                 return None
 
-            if status.status == "awaiting_approval" and status.pending_approvals:
+            pending = status.metadata.pending_changes if status.metadata else None
+            if status.status == "awaiting_approval" and pending:
                 await self._handle_approvals(
-                    session_id, status.pending_approvals, hitl_approvals, result,
+                    session_id, job_id, pending, hitl_approvals, result,
                 )
 
         result.errors.append("Step 2 (async_edit): timed out after 60s")
@@ -218,19 +222,20 @@ class RevisionPipeline:
     async def _handle_approvals(
         self,
         session_id: str,
+        job_id: str,
         pending: list[dict[str, Any]],
         hitl_approvals: dict[str, bool] | None,
         result: PipelineResult,
     ) -> None:
         """Approve or deny proposed changes."""
         for change in pending:
-            chunk_id = change.get("chunk_id", "")
-            approved = hitl_approvals.get(chunk_id, False) if hitl_approvals is not None else True
+            change_id = change.get("change_id", "")
+            approved = hitl_approvals.get(change_id, False) if hitl_approvals is not None else True
             try:
-                resp = await self.client.approve(session_id, chunk_id, approved)
+                resp = await self.client.approve(session_id, job_id, approved, change_id=change_id)
                 result.approval_results.append(resp)
             except SuperDocsError as e:
-                result.errors.append(f"Approval (chunk={chunk_id}): {e}")
+                result.errors.append(f"Approval (change={change_id}): {e}")
 
     async def _get_post_edit_html(
         self, session_id: str, edit_response: dict[str, Any]
@@ -248,6 +253,7 @@ class RevisionPipeline:
             return updated
 
         # Fallback: fetch from session history (0 ops)
+        # document_html is a property that extracts from document_state.html_content
         try:
             history = await self.client.get_session_history(session_id)
             if history.document_html:

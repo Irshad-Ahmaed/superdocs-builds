@@ -30,11 +30,15 @@ def test_missing_api_key_raises() -> None:
 @respx.mock
 async def test_start_session_calls_correct_endpoint() -> None:
     respx.post("https://api.superdocs.app/v1/chat").mock(
-        return_value=httpx.Response(200, json={"message": "ok", "document_changes": None})
+        return_value=httpx.Response(200, json={
+            "response": "ok",
+            "session_id": "test-session",
+            "document_changes": None,
+        })
     )
     async with SuperDocsClient(api_key="sk_test_key") as client:
         result = await client.start_session("<p>Hello</p>", "test-session")
-        assert result.message == "ok"
+        assert result.response == "ok"
         assert client.tracker.total_ops == 1
 
 
@@ -56,7 +60,25 @@ async def test_export_returns_download_url() -> None:
 @respx.mock
 async def test_list_sessions() -> None:
     respx.get("https://api.superdocs.app/v1/sessions").mock(
-        return_value=httpx.Response(200, json=[{"session_id": "s1"}, {"session_id": "s2"}])
+        return_value=httpx.Response(200, json={
+            "sessions": [
+                {
+                    "session_id": "s1",
+                    "created_at": "2025-01-01T00:00:00Z",
+                    "last_activity": "2025-01-01T01:00:00Z",
+                    "message_count": 5,
+                    "preview": "First session",
+                },
+                {
+                    "session_id": "s2",
+                    "created_at": "2025-01-02T00:00:00Z",
+                    "last_activity": "2025-01-02T01:00:00Z",
+                    "message_count": 3,
+                    "preview": "Second session",
+                },
+            ],
+            "total": 2,
+        })
     )
     async with SuperDocsClient(api_key="sk_test_key") as client:
         sessions = await client.list_sessions()

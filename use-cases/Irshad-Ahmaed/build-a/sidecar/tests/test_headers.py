@@ -44,7 +44,8 @@ async def test_stamp_sends_single_chat_turn() -> None:
     async with SuperDocsClient(api_key=TEST_API_KEY) as client:
         respx.post("https://api.superdocs.app/v1/chat").mock(
             return_value=httpx.Response(200, json={
-                "message": "Headers and footers updated",
+                "response": "Headers and footers updated",
+                "session_id": "test-session",
                 "document_changes": {},
             })
         )
@@ -61,7 +62,8 @@ async def test_stamp_records_operation() -> None:
     async with SuperDocsClient(api_key=TEST_API_KEY) as client:
         respx.post("https://api.superdocs.app/v1/chat").mock(
             return_value=httpx.Response(200, json={
-                "message": "Done",
+                "response": "Done",
+                "session_id": "test-session",
                 "document_changes": {},
             })
         )
@@ -106,6 +108,11 @@ async def test_export_falls_back_to_presigned_url(tmp_path) -> None:
         respx.post("https://api.superdocs.app/v1/downloads").mock(
             return_value=httpx.Response(200, json={
                 "download_url": "https://cdn.example.com/fallback.pdf",
+                "expires_at": "2025-01-02T00:00:00Z",
+                "expires_in_seconds": 86400,
+                "curl_example": "curl -o fallback.pdf https://cdn.example.com/fallback.pdf",
+                "filename": "fallback.pdf",
+                "format": "pdf",
             })
         )
         respx.get("https://cdn.example.com/fallback.pdf").mock(

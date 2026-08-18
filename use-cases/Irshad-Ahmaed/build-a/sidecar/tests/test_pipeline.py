@@ -53,15 +53,15 @@ async def test_sync_flow_end_to_end() -> None:
     """Full sync flow: load -> edit -> diff -> inject apparatus."""
     _mock_chat_sequence(
         # Step 1: start session
-        {"message": "Document loaded", "document_changes": None},
+        {"response": "Document loaded", "session_id": "test-revision", "document_changes": None},
         # Step 2: edit
-        {"message": "Edit applied", "document_changes": {
-            "chunk_id": "c1", "updated_html": EDITED_HTML
+        {"response": "Edit applied", "session_id": "test-revision", "document_changes": {
+            "updated_html": EDITED_HTML
         }},
         # Step 3+: apparatus injections — record+highlights batch
-        {"message": "Apparatus injected", "document_changes": None},
+        {"response": "Apparatus injected", "session_id": "test-revision", "document_changes": None},
         # Step 4: change-bars batch
-        {"message": "Change bars added", "document_changes": None},
+        {"response": "Change bars added", "session_id": "test-revision", "document_changes": None},
     )
     async with SuperDocsClient(api_key="sk_test_key") as client:
         pipeline = RevisionPipeline(client)
@@ -92,9 +92,10 @@ async def test_no_changes_skips_apparatus() -> None:
     """When edit produces no changes, apparatus injection is skipped."""
     _mock_chat_sequence(
         # Step 1: start session
-        {"message": "Document loaded", "document_changes": None},
+        {"response": "Document loaded", "session_id": "test-no-changes", "document_changes": None},
         # Step 2: edit returns same HTML (no changes)
-        {"message": "No changes needed", "document_changes": {"updated_html": SAMPLE_HTML}},
+        {"response": "No changes needed", "session_id": "test-no-changes",
+         "document_changes": {"updated_html": SAMPLE_HTML}},
     )
     async with SuperDocsClient(api_key="sk_test_key") as client:
         pipeline = RevisionPipeline(client)
@@ -146,10 +147,11 @@ async def test_session_load_failure_returns_error() -> None:
 async def test_metadata_in_instruction_content() -> None:
     """Verify revision number and date appear in generated instructions."""
     _mock_chat_sequence(
-        {"message": "Document loaded", "document_changes": None},
-        {"message": "Edit applied", "document_changes": {"updated_html": EDITED_HTML}},
-        {"message": "Apparatus injected", "document_changes": None},
-        {"message": "Change bars added", "document_changes": None},
+        {"response": "Document loaded", "session_id": "test-metadata", "document_changes": None},
+        {"response": "Edit applied", "session_id": "test-metadata",
+         "document_changes": {"updated_html": EDITED_HTML}},
+        {"response": "Apparatus injected", "session_id": "test-metadata", "document_changes": None},
+        {"response": "Change bars added", "session_id": "test-metadata", "document_changes": None},
     )
     async with SuperDocsClient(api_key="sk_test_key") as client:
         pipeline = RevisionPipeline(client)
@@ -179,10 +181,11 @@ async def test_metadata_in_instruction_content() -> None:
 async def test_tracker_counts_ops() -> None:
     """Pipeline run increments the client's operation tracker."""
     _mock_chat_sequence(
-        {"message": "Document loaded", "document_changes": None},
-        {"message": "Done", "document_changes": {"updated_html": EDITED_HTML}},
-        {"message": "Apparatus injected", "document_changes": None},
-        {"message": "Change bars added", "document_changes": None},
+        {"response": "Document loaded", "session_id": "test-ops", "document_changes": None},
+        {"response": "Done", "session_id": "test-ops",
+         "document_changes": {"updated_html": EDITED_HTML}},
+        {"response": "Apparatus injected", "session_id": "test-ops", "document_changes": None},
+        {"response": "Change bars added", "session_id": "test-ops", "document_changes": None},
     )
     async with SuperDocsClient(api_key="sk_test_key") as client:
         pipeline = RevisionPipeline(client)
