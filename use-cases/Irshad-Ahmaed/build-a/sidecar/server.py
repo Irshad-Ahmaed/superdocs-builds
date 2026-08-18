@@ -175,6 +175,7 @@ class ApparatusRequest(BaseModel):
     date: str
     changes: list[str] = []
     highlights_summary: str = ""
+    include_stamp: bool = False
 
 
 class ApparatusResponse(BaseModel):
@@ -182,6 +183,7 @@ class ApparatusResponse(BaseModel):
     ops_used: int
     changes_count: int
     apparatus_instructions: list[str]
+    stamp_result: StampResult | None = None
     diff_entries: list[DiffEntry] = []
     total_paragraphs_old: int = 0
     total_paragraphs_new: int = 0
@@ -190,7 +192,7 @@ class ApparatusResponse(BaseModel):
 
 @app.post("/api/step/apparatus", response_model=ApparatusResponse)
 async def step_apparatus(req: ApparatusRequest) -> ApparatusResponse:
-    """Step 2-3: Diff + generate and send apparatus instructions."""
+    """Step 2-3: Diff + generate apparatus + optional stamp in ONE edit call."""
     try:
         differ = DocDiffer()
         diff = differ.diff(req.pre_edit_html, req.post_edit_html)
@@ -211,17 +213,46 @@ async def step_apparatus(req: ApparatusRequest) -> ApparatusResponse:
         apparatus = RevisionApparatus()
         instructions = apparatus.generate_combined(diff, metadata)
 
+        # Combine apparatus + stamp into a single edit call
+        combined_instruction = " ".join(instructions)
+        if req.include_stamp:
+            from .headers import HeaderFooterStamper
+            stamper = HeaderFooterStamper.__new__(HeaderFooterStamper)
+            stamp_instruction = stamper.build_combined_instruction(req.revision_number, req.date)
+            combined_instruction += f" {stamp_instruction}"
+
         async with SuperDocsClient() as client:
-            apparatus_ops = 0
-            for instruction in instructions:
+            try:
+                await client.edit(combined_instruction, req.session_id)
+                ops = 1
+            except SuperDocsError as e:
+                return ApparatusResponse(
+                    success=False, ops_used=0, changes_count=len(diff.changed),
+                    apparatus_instructions=instructions, errors=[str(e)],
+                )
+
+            # Verify stamp if included
+            stamp_result = None
+            if req.include_stamp:
+                verified_header = False
+                verified_footer = False
                 try:
-                    await client.edit(instruction, req.session_id)
-                    apparatus_ops += 1
-                except SuperDocsError as e:
-                    return ApparatusResponse(
-                        success=False, ops_used=apparatus_ops, changes_count=len(diff.changed),
-                        apparatus_instructions=instructions, errors=[str(e)],
-                    )
+                    history = await client.get_session_history(req.session_id)
+                    if history.document_html:
+                        import re
+                        html_lower = history.document_html.lower()
+                        verified_header = f"revision {req.revision_number}".lower() in html_lower
+                        verified_footer = bool(re.search(r'page\s+\d+\s+of\s+\d+', html_lower))
+                except SuperDocsError:
+                    pass
+                stamp_result = StampResult(
+                    session_id=req.session_id,
+                    header_text=f"Revision {req.revision_number} — {req.date}",
+                    footer_text="Page X of Y",
+                    ops_used=0,  # included in the combined call
+                    verified_header=verified_header,
+                    verified_footer=verified_footer,
+                )
 
             diff_entries = [
                 DiffEntry(
@@ -231,8 +262,9 @@ async def step_apparatus(req: ApparatusRequest) -> ApparatusResponse:
                 for d in diff.changed
             ]
             return ApparatusResponse(
-                success=True, ops_used=apparatus_ops, changes_count=len(diff.changed),
-                apparatus_instructions=instructions, diff_entries=diff_entries,
+                success=True, ops_used=ops, changes_count=len(diff.changed),
+                apparatus_instructions=instructions, stamp_result=stamp_result,
+                diff_entries=diff_entries,
                 total_paragraphs_old=diff.total_paragraphs_old,
                 total_paragraphs_new=diff.total_paragraphs_new,
             )

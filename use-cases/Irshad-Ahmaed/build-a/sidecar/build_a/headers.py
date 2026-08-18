@@ -25,6 +25,8 @@ class StampResult:
     header_text: str
     footer_text: str
     ops_used: int
+    verified_header: bool = False
+    verified_footer: bool = False
 
 
 class HeaderFooterStamper:
