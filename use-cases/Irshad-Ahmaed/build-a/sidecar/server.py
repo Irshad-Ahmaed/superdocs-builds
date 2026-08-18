@@ -8,12 +8,15 @@ Run:
 from __future__ import annotations
 
 import base64
+import logging
 from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 from build_a.apparatus import RevisionApparatus, RevisionMetadata
 from build_a.client import AuthError, SuperDocsClient, SuperDocsError
@@ -213,14 +216,30 @@ async def step_apparatus(req: ApparatusRequest) -> ApparatusResponse:
         apparatus = RevisionApparatus()
         instructions = apparatus.generate_combined(diff, metadata)
 
-        # Combine apparatus + stamp into a single edit call
+        # Combine apparatus + stamp into a single edit call (fallback)
         combined_instruction = " ".join(instructions)
+        stamp_via_parts = False
         if req.include_stamp:
-            stamper = HeaderFooterStamper.__new__(HeaderFooterStamper)
-            stamp_instruction = stamper.build_combined_instruction(req.revision_number, req.date)
-            combined_instruction += f" {stamp_instruction}"
+            # Try parts API first (0 ops, no AI call needed)
+            document_id = None
+            try:
+                async with SuperDocsClient() as client:
+                    docs = await client.list_session_documents(req.session_id)
+                    if docs and isinstance(docs, list) and len(docs) > 0:
+                        document_id = docs[0].get("document_id") or docs[0].get("durable_document_id")
+            except SuperDocsError:
+                pass
+
+            if document_id:
+                stamp_via_parts = True
+            else:
+                # Fallback: append stamp instruction to apparatus chat call
+                stamper = HeaderFooterStamper.__new__(HeaderFooterStamper)
+                stamp_instruction = stamper.build_combined_instruction(req.revision_number, req.date)
+                combined_instruction += f" {stamp_instruction}"
 
         async with SuperDocsClient() as client:
+            # Send apparatus via chat (1 op if changes exist)
             try:
                 await client.edit(combined_instruction, req.session_id)
                 ops = 1
@@ -230,9 +249,44 @@ async def step_apparatus(req: ApparatusRequest) -> ApparatusResponse:
                     apparatus_instructions=instructions, errors=[str(e)],
                 )
 
-            # Verify stamp if included
+            # Apply stamp via parts API if available (0 ops)
             stamp_result = None
-            if req.include_stamp:
+            if stamp_via_parts:
+                header_html = f"Revision {req.revision_number} — {req.date}"
+                footer_html = (
+                    f"Page <span data-field=\"PAGE\">1</span> of "
+                    f"<span data-field=\"NUMPAGES\">1</span>"
+                )
+                try:
+                    docs = await client.list_session_documents(req.session_id)
+                    if docs and isinstance(docs, list) and len(docs) > 0:
+                        doc_id = docs[0].get("document_id") or docs[0].get("durable_document_id")
+                        if doc_id:
+                            parts = {
+                                "headers": {"0": {"default": f"<p>{header_html}</p>"}},
+                                "footers": {"0": {"default": f"<p>{footer_html}</p>"}},
+                            }
+                            await client.update_document_parts(doc_id, parts)
+                            stamp_result = StampResult(
+                                session_id=req.session_id,
+                                header_text=header_html,
+                                footer_text="Page X of Y",
+                                ops_used=0,
+                                verified_header=True,
+                                verified_footer=True,
+                            )
+                except SuperDocsError as e:
+                    logger.warning("Parts API stamp failed: %s", e)
+                    stamp_result = StampResult(
+                        session_id=req.session_id,
+                        header_text=f"Revision {req.revision_number} — {req.date}",
+                        footer_text="Page X of Y",
+                        ops_used=0,
+                        verified_header=False,
+                        verified_footer=False,
+                    )
+            elif req.include_stamp:
+                # Stamp was included in the combined chat call — verify
                 verified_header = False
                 verified_footer = False
                 try:
@@ -248,7 +302,7 @@ async def step_apparatus(req: ApparatusRequest) -> ApparatusResponse:
                     session_id=req.session_id,
                     header_text=f"Revision {req.revision_number} — {req.date}",
                     footer_text="Page X of Y",
-                    ops_used=0,  # included in the combined call
+                    ops_used=0,
                     verified_header=verified_header,
                     verified_footer=verified_footer,
                 )

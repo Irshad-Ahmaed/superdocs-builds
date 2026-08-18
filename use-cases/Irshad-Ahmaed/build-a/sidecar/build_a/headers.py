@@ -1,7 +1,7 @@
 """Header/footer stamping and controlled PDF export for Build A.
 
-Sends chat instructions to stamp revision identity on every page,
-then exports the controlled PDF and saves it to disk.
+Uses PATCH /v1/documents/{document_id} with parts payload for headers/footers.
+Dynamic page fields use <span data-field="PAGE|NUMPAGES"> for auto-numbering.
 """
 
 from __future__ import annotations
@@ -30,24 +30,25 @@ class StampResult:
 
 
 class HeaderFooterStamper:
-    """Stamps revision identity on headers/footers via chat instructions.
+    """Stamps revision identity on headers/footers via the document parts API.
 
-    Headers and footers are first-class document parts on SuperDocs —
-    edited by chat instruction, the same flow as body edits.
+    Uses PATCH /v1/documents/{document_id} with parts payload.
+    Headers/footers are set as HTML with <span data-field="PAGE|NUMPAGES">
+    for dynamic page numbering.
     """
 
     def __init__(self, client: SuperDocsClient) -> None:
         self.client = client
 
     def build_header_instruction(self, revision_number: str, date: str) -> str:
-        """Build the chat instruction to set the header."""
+        """Build the chat instruction to set the header (fallback)."""
         return (
             f"Set the header on every page to: "
             f"'Revision {revision_number} — {date}'"
         )
 
     def build_footer_instruction(self) -> str:
-        """Build the chat instruction to set page-numbered footer."""
+        """Build the chat instruction to set page-numbered footer (fallback)."""
         return (
             "Set the footer on every page to show page numbers in the format 'Page X of Y'. "
             "Use a consistent font and size matching the header."
@@ -70,18 +71,55 @@ class HeaderFooterStamper:
         revision_number: str,
         date: str,
     ) -> StampResult:
-        """Send the combined header/footer instruction (1 op).
+        """Stamp headers/footers using the document parts API (0 ops).
 
-        This stamps revision identity on every page via a single chat turn.
+        Uses PATCH /v1/documents/{document_id} with parts payload.
+        Falls back to chat instruction if document_id is unavailable.
         """
+        header_text = f"Revision {revision_number} — {date}"
+        footer_html = (
+            "Page <span data-field=\"PAGE\">1</span> of "
+            "<span data-field=\"NUMPAGES\">1</span>"
+        )
+        header_html = header_text
+
+        # Try to get document_id from session
+        document_id = None
+        try:
+            docs = await self.client.list_session_documents(session_id)
+            if docs and isinstance(docs, list) and len(docs) > 0:
+                document_id = docs[0].get("document_id") or docs[0].get("durable_document_id")
+        except SuperDocsError:
+            pass
+
+        if document_id:
+            # Use the proper parts API (0 ops, direct document mutation)
+            parts = {
+                "headers": {
+                    "0": {"default": f"<p>{header_html}</p>"},
+                },
+                "footers": {
+                    "0": {"default": f"<p>{footer_html}</p>"},
+                },
+            }
+            try:
+                await self.client.update_document_parts(document_id, parts)
+                return StampResult(
+                    session_id=session_id,
+                    header_text=header_text,
+                    footer_text="Page X of Y",
+                    ops_used=0,
+                )
+            except SuperDocsError as e:
+                logger.warning("Parts API failed, falling back to chat: %s", e)
+
+        # Fallback: chat instruction (1 op)
         instruction = self.build_combined_instruction(revision_number, date)
         await self.client.edit(message=instruction, session_id=session_id)
-        header = f"Revision {revision_number} — {date}"
-        footer = "Page X of Y"
         return StampResult(
             session_id=session_id,
-            header_text=header,
-            footer_text=footer,
+            header_text=header_text,
+            footer_text="Page X of Y",
             ops_used=1,
         )
 
