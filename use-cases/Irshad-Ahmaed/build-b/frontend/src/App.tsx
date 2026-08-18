@@ -33,8 +33,23 @@ function App() {
   const handleDownload = async () => {
     setDownloading(true)
     try {
-      // TODO: call sidecar API when Ticket 6 lands
-      await new Promise(r => setTimeout(r, 500))
+      const res = await fetch('/api/export-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: `roi-${Date.now()}`,
+          volume, hours, hourly_cost: hourlyCost,
+          infrastructure_monthly: infra, horizon_years: horizon,
+        }),
+      })
+      if (!res.ok) throw new Error(`Export failed: ${res.statusText}`)
+      const data = await res.json()
+      if (data.download_url) {
+        window.open(data.download_url, '_blank')
+      }
+      setPdfUrl(data.pdf_path || null)
+    } catch (e) {
+      alert(String(e))
     } finally {
       setDownloading(false)
     }
