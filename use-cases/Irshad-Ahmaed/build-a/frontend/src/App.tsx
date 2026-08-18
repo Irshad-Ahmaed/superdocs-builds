@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import DOMPurify from 'dompurify'
 
 type Step = 'idle' | 'running' | 'done' | 'error'
 type PipelineStep = 'load-edit' | 'apparatus' | 'stamp' | 'done'
@@ -88,7 +89,7 @@ function DocumentPreview({ html, label }: { html: string; label: string }) {
       <div style={{ fontSize: 12, fontWeight: 600, color: '#666', marginBottom: 4 }}>{label}</div>
       <div
         style={{ border: '1px solid #ddd', borderRadius: 6, padding: 16, background: '#fff', fontFamily: 'serif', fontSize: 14, lineHeight: 1.6, maxHeight: 250, overflow: 'auto' }}
-        dangerouslySetInnerHTML={{ __html: html }}
+        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }}
       />
     </div>
   )
@@ -96,7 +97,6 @@ function DocumentPreview({ html, label }: { html: string; label: string }) {
 
 interface LogEntry {
   msg: string
-  time?: number
 }
 
 function App() {
@@ -152,6 +152,8 @@ function App() {
     const changes = [editInstructions || 'Updated crew complement from 2 to 3 pilots for long-haul flights; added type rating requirement']
 
     try {
+      let runningOps = 0
+
       // ── Step 1: Load + Edit ──
       const t1 = Date.now()
       addLog('Step 1/3: Loading document + applying edits via SuperDocs API...')
@@ -174,7 +176,8 @@ function App() {
       setStepTimers(prev => ({ ...prev, 'load-edit': t1Done - t1 }))
       addLog(`Step 1 complete in ${timeSince(t1)} — ${loadEdit.ops_used} op(s). Response: "${loadEdit.response_text.slice(0, 80)}..."`)
       setPostEditHtml(loadEdit.post_edit_html)
-      setTotalOps(loadEdit.ops_used)
+      runningOps += loadEdit.ops_used
+      setTotalOps(runningOps)
 
       // ── Step 2: Apparatus (diff + inject) ──
       setPipelineStep('apparatus')
@@ -203,7 +206,8 @@ function App() {
       addLog(`Step 2 complete in ${timeSince(t2)} — ${apparatus.changes_count} changes, ${apparatus.ops_used} op(s), ${apparatus.apparatus_instructions.length} batch(es)`)
       setDiffEntries(apparatus.diff_entries)
       setApparatusInstructions(apparatus.apparatus_instructions)
-      setTotalOps(prev => prev + apparatus.ops_used)
+      runningOps += apparatus.ops_used
+      setTotalOps(runningOps)
 
       // ── Step 3: Stamp ──
       setPipelineStep('stamp')
@@ -227,12 +231,13 @@ function App() {
       addLog(`Step 3 complete in ${timeSince(t3)} — 1 op. Header: ${stamp.header_text}`)
       addLog(`Footer: ${stamp.footer_text}`)
       setStampResult(stamp)
-      setTotalOps(prev => prev + stamp.ops_used)
+      runningOps += stamp.ops_used
+      setTotalOps(runningOps)
 
       setPipelineStep('done')
       stopTimer()
       const totalTime = ((t3Done - t1) / 1000).toFixed(1)
-      addLog(`All done in ${totalTime}s — ${totalOps + stamp.ops_used} total ops`)
+      addLog(`All done in ${totalTime}s — ${runningOps} total ops`)
       setStep('done')
     } catch (e) {
       stopTimer()

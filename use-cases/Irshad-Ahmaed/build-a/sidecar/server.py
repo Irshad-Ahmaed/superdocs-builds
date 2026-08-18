@@ -66,7 +66,7 @@ class PipelineResponse(BaseModel):
 
 
 class StampRequest(BaseModel):
-    session_id: str
+    session_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,128}$")
     revision_number: str
     date: str
 
@@ -78,8 +78,8 @@ class StampResponse(BaseModel):
 
 
 class ExportRequest(BaseModel):
-    session_id: str
-    output_path: str = "output.pdf"
+    session_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,128}$")
+    output_path: str = Field(default="output.pdf", pattern=r"^[a-zA-Z0-9_\-./]+$")
 
 
 class ExportResponse(BaseModel):
@@ -302,9 +302,12 @@ async def stamp_headers(req: StampRequest) -> StampResponse:
 async def export_pdf(req: ExportRequest) -> ExportResponse:
     """Export a controlled PDF."""
     try:
+        safe_path = Path(req.output_path).resolve()
+        if not safe_path.is_relative_to(Path.cwd()):
+            raise HTTPException(status_code=400, detail="Path outside working directory")
         async with SuperDocsClient() as client:
             exporter = ControlledExporter(client)
-            result = await exporter.export_pdf(req.session_id, Path(req.output_path).resolve())
+            result = await exporter.export_pdf(req.session_id, safe_path)
             return ExportResponse(
                 pdf_path=str(result.pdf_path),
                 download_url=result.download_url,

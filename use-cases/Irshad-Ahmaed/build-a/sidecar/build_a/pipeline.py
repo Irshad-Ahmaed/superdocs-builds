@@ -1,13 +1,12 @@
 """Revision apparatus pipeline — end-to-end orchestration.
 
 Connects the SuperDocs client, doc-diff engine, and revision apparatus
-generator into a single callable pipeline. Handles sync and async edit
-paths, HITL approval flow, and operation budget tracking.
+generator into a single callable pipeline. Handles document loading,
+editing, diffing, apparatus injection, and operation budget tracking.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Any
@@ -26,9 +25,7 @@ class PipelineResult:
     session_id: str
     diff: DiffResult
     apparatus_instructions: list[str] = field(default_factory=list)
-    edit_response: dict[str, Any] | None = None
     apparatus_responses: list[dict[str, Any]] = field(default_factory=list)
-    approval_results: list[dict[str, Any]] = field(default_factory=list)
     ops_used: int = 0
     errors: list[str] = field(default_factory=list)
     post_edit_html: str = ""
@@ -65,30 +62,19 @@ class RevisionPipeline:
         session_id: str,
         edit_instructions: str,
         metadata: RevisionMetadata,
-        *,
-        use_async: bool = False,
-        approval_mode: str = "auto_accept",
-        hitl_approvals: dict[str, bool] | None = None,
     ) -> PipelineResult:
         """Run the full revision flow.
 
         Steps:
         1. Start session + load document + apply edit (1 op — combined)
-        2. (Optional) HITL approval for edit
-        3. Diff pre-edit vs post-edit HTML
-        4. Generate apparatus instructions
-        5. Send apparatus instructions (1 op per batch)
-        6. (Optional) HITL approval for apparatus
+        2. Diff pre-edit vs post-edit HTML (0 ops — local)
+        3. Generate and send apparatus instructions (1 op per batch)
 
         Args:
             document_html: The prior revision's HTML to load.
             session_id: User-chosen session identifier.
             edit_instructions: Natural language edit instructions.
             metadata: Revision metadata (number, date, changes).
-            use_async: Use async_edit + HITL instead of sync edit.
-            approval_mode: "auto_accept" or "ask_every_time".
-            hitl_approvals: If using HITL, dict mapping chunk_id → approved.
-                If None, all proposed changes are approved.
         """
         result = PipelineResult(session_id=session_id, diff=DiffResult(
             changed=[], total_paragraphs_old=0, total_paragraphs_new=0,
@@ -137,90 +123,6 @@ class RevisionPipeline:
         result.ops_used = self.client.tracker.total_ops
         return result
 
-    async def _apply_edit_sync(
-        self,
-        session_id: str,
-        edit_instructions: str,
-        result: PipelineResult,
-    ) -> dict[str, Any] | None:
-        """Apply edits synchronously (1 op)."""
-        try:
-            resp = await self.client.edit(edit_instructions, session_id)
-            result.edit_response = resp.model_dump()
-            return result.edit_response
-        except SuperDocsError as e:
-            result.errors.append(f"Step 2 (edit): {e}")
-            return None
-
-    async def _apply_edit_async(
-        self,
-        session_id: str,
-        edit_instructions: str,
-        approval_mode: str,
-        hitl_approvals: dict[str, bool] | None,
-        result: PipelineResult,
-    ) -> dict[str, Any] | None:
-        """Apply edits asynchronously with optional HITL (1 op + approval ops)."""
-        try:
-            job_resp = await self.client.async_edit(
-                edit_instructions, session_id, approval_mode=approval_mode,
-            )
-        except SuperDocsError as e:
-            result.errors.append(f"Step 2 (async_edit): {e}")
-            return None
-
-        job_id = job_resp.get("job_id")
-        if not job_id:
-            result.errors.append("Step 2 (async_edit): no job_id returned")
-            return None
-
-        # Poll until complete or awaiting approval
-        for _ in range(60):  # max 60 polls (60s)
-            await asyncio.sleep(1.0)
-            try:
-                status = await self.client.poll_job(job_id)
-            except SuperDocsError as e:
-                result.errors.append(f"Step 2 (poll): {e}")
-                return None
-
-            if status.status == "completed":
-                return (
-                    status.result.document_changes.model_dump()
-                    if status.result and status.result.document_changes
-                    else {}
-                )
-
-            if status.status == "failed":
-                result.errors.append(f"Step 2 (async_edit): {status.error or 'unknown failure'}")
-                return None
-
-            pending = status.metadata.pending_changes if status.metadata else None
-            if status.status == "awaiting_approval" and pending:
-                await self._handle_approvals(
-                    session_id, job_id, pending, hitl_approvals, result,
-                )
-
-        result.errors.append("Step 2 (async_edit): timed out after 60s")
-        return None
-
-    async def _handle_approvals(
-        self,
-        session_id: str,
-        job_id: str,
-        pending: list[dict[str, Any]],
-        hitl_approvals: dict[str, bool] | None,
-        result: PipelineResult,
-    ) -> None:
-        """Approve or deny proposed changes."""
-        for change in pending:
-            change_id = change.get("change_id", "")
-            approved = hitl_approvals.get(change_id, False) if hitl_approvals is not None else True
-            try:
-                resp = await self.client.approve(session_id, job_id, approved, change_id=change_id)
-                result.approval_results.append(resp)
-            except SuperDocsError as e:
-                result.errors.append(f"Approval (change={change_id}): {e}")
-
     async def _get_post_edit_html(
         self, session_id: str, edit_response: dict[str, Any]
     ) -> str:
@@ -238,6 +140,6 @@ class RevisionPipeline:
             if history.document_html:
                 return history.document_html
         except SuperDocsError as exc:
-            logger.warning("Failed to fetch session history for pre-edit HTML: %s", exc)
+            logger.warning("Failed to fetch session history for post-edit HTML: %s", exc)
 
         return ""  # worst case: empty, diff will show everything as added
