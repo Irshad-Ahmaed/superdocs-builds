@@ -14,6 +14,7 @@ interface DiffEntry {
 interface LoadEditResult {
   success: boolean
   ops_used: number
+  pre_edit_html: string
   post_edit_html: string
   response_text: string
   errors: string[]
@@ -159,7 +160,6 @@ function App() {
       // ── Step 1: Load + Edit ──
       const t1 = Date.now()
       addLog('Step 1/3: Loading document + applying edits via SuperDocs API...')
-      setPreEditHtml(SAMPLE_HTML)
 
       const loadEditRes = await fetch(`${API}/step/load-edit`, {
         method: 'POST',
@@ -173,6 +173,10 @@ function App() {
       if (!loadEditRes.ok) throw new Error(`Load+Edit failed: ${loadEditRes.statusText}`)
       const loadEdit = await loadEditRes.json() as LoadEditResult
       if (!loadEdit.success) throw new Error(loadEdit.errors.join(', '))
+
+      // Use pre-edit HTML from session (actual current state), not hardcoded SAMPLE_HTML
+      const actualPreEdit = loadEdit.pre_edit_html || SAMPLE_HTML
+      setPreEditHtml(actualPreEdit)
 
       const t1Done = Date.now()
       setStepTimers(prev => ({ ...prev, 'load-edit': t1Done - t1 }))
@@ -192,7 +196,7 @@ function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             session_id: sid,
-            pre_edit_html: SAMPLE_HTML,
+            pre_edit_html: actualPreEdit,
             post_edit_html: loadEdit.post_edit_html,
             revision_number: revisionNumber,
             date: date,
@@ -395,7 +399,7 @@ function App() {
                 </div>
                 <div>
                   <div style={{ fontSize: 12, color: stampResult.verified_footer ? '#666' : '#d97706' }}>
-                    Footer {stampResult.verified_footer ? '✓ verified' : '⚠ unverified — check PDF'}
+                    Footer {stampResult.verified_footer ? '✓ verified' : '⚠ not rendered (SuperDocs may not support dynamic page numbering)'}
                   </div>
                   <div style={{ fontWeight: 600 }}>{stampResult.footer_text}</div>
                 </div>

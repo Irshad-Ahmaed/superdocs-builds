@@ -106,6 +106,7 @@ class LoadEditRequest(BaseModel):
 class LoadEditResponse(BaseModel):
     success: bool
     ops_used: int
+    pre_edit_html: str
     post_edit_html: str
     response_text: str
     errors: list[str] = []
@@ -116,6 +117,15 @@ async def step_load_edit(req: LoadEditRequest) -> LoadEditResponse:
     """Step 1: Load document + apply edit instructions (1 API call, 1 op)."""
     try:
         async with SuperDocsClient() as client:
+            # Fetch current document state before applying edits
+            pre_html = ""
+            try:
+                history = await client.get_session_history(req.session_id)
+                if history.document_html:
+                    pre_html = history.document_html
+            except SuperDocsError:
+                pass
+
             resp = await client.start_session(
                 req.document_html, req.session_id, message=req.edit_instructions,
             )
@@ -124,13 +134,18 @@ async def step_load_edit(req: LoadEditRequest) -> LoadEditResponse:
             if doc_changes and doc_changes.updated_html:
                 post_html = doc_changes.updated_html
             elif resp.response:
-                # Try to extract from response if no document_changes
                 history = await client.get_session_history(req.session_id)
                 if history.document_html:
                     post_html = history.document_html
+
+            # Use fetched pre-edit HTML; fall back to input document_html
+            if not pre_html:
+                pre_html = req.document_html
+
             return LoadEditResponse(
                 success=True,
                 ops_used=client.tracker.total_ops,
+                pre_edit_html=pre_html,
                 post_edit_html=post_html,
                 response_text=resp.response or "",
             )
@@ -300,7 +315,9 @@ async def stamp_headers(req: StampRequest) -> StampResponse:
                 if history.document_html:
                     html_lower = history.document_html.lower()
                     verified_header = f"revision {req.revision_number}".lower() in html_lower
-                    verified_footer = "page" in html_lower and ("of" in html_lower or "1" in html_lower)
+                    # Footer: check for "page" + digit pattern (e.g., "Page 1 of 5")
+                    import re
+                    verified_footer = bool(re.search(r'page\s+\d+\s+of\s+\d+', html_lower))
             except SuperDocsError:
                 pass  # verification is best-effort
 

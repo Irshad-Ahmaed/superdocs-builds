@@ -72,7 +72,7 @@ class HeaderFooterStamper:
         instruction = self.build_combined_instruction(revision_number, date)
         await self.client.edit(message=instruction, session_id=session_id)
         header = f"Revision {revision_number} — {date}"
-        footer = "Page X of Y (auto-numbered by SuperDocs)"
+        footer = "Page X of Y"
         return StampResult(
             session_id=session_id,
             header_text=header,
