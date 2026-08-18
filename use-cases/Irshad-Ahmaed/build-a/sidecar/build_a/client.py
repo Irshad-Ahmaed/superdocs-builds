@@ -355,7 +355,7 @@ class SuperDocsClient:
     ) -> SessionHistory:
         """Restore session history, optionally with full document HTML (0 ops).
 
-        API returns {session_id, messages, document_state: {html_content, ...}, editor_action}.
+        API returns {session_id, entries, document_state: {html_content, ...}, editor_action}.
         The document_html is accessed via session_history.document_html property.
         """
         params: dict[str, Any] = {}

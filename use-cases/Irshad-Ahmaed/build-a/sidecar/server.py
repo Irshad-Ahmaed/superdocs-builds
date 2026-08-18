@@ -75,6 +75,8 @@ class StampResponse(BaseModel):
     header_text: str
     footer_text: str
     ops_used: int
+    verified_header: bool = False
+    verified_footer: bool = False
 
 
 class ExportRequest(BaseModel):
@@ -284,15 +286,30 @@ async def run_pipeline(req: PipelineRequest) -> PipelineResponse:
 
 @app.post("/api/stamp", response_model=StampResponse)
 async def stamp_headers(req: StampRequest) -> StampResponse:
-    """Stamp headers/footers with revision identity."""
+    """Stamp headers/footers with revision identity, then verify."""
     try:
         async with SuperDocsClient() as client:
             stamper = HeaderFooterStamper(client)
             result = await stamper.stamp(req.session_id, req.revision_number, req.date)
+
+            # Verify: fetch document and check if header/footer were applied
+            verified_header = False
+            verified_footer = False
+            try:
+                history = await client.get_session_history(req.session_id)
+                if history.document_html:
+                    html_lower = history.document_html.lower()
+                    verified_header = f"revision {req.revision_number}".lower() in html_lower
+                    verified_footer = "page" in html_lower and ("of" in html_lower or "1" in html_lower)
+            except SuperDocsError:
+                pass  # verification is best-effort
+
             return StampResponse(
                 header_text=result.header_text,
                 footer_text=result.footer_text,
                 ops_used=result.ops_used,
+                verified_header=verified_header,
+                verified_footer=verified_footer,
             )
     except SuperDocsError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e

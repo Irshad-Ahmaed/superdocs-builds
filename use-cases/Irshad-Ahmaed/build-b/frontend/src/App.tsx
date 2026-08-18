@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import DOMPurify from 'dompurify'
 
 const TIERS = [
   { name: 'Free', max: 500, monthly: 0 },
@@ -117,7 +118,7 @@ function App() {
           ].map(f => (
             <div key={f.label}>
               <label style={{ display: 'block', marginBottom: 4, fontWeight: 600, fontSize: 12 }}>{f.label}</label>
-              <input type="number" value={f.value} onChange={e => f.set(+e.target.value)}
+              <input type="number" value={f.value} onChange={e => f.set(e.target.value === '' ? 0 : +e.target.value)}
                 style={{ width: '100%', padding: 8, borderRadius: 4, border: '1px solid #ccc', fontSize: 14, boxSizing: 'border-box' }} />
             </div>
           ))}
@@ -196,7 +197,7 @@ function App() {
         <div style={{ marginTop: 8 }}>
           <h3>Generated Report (HTML Preview)</h3>
           <div style={{ border: '1px solid #ddd', borderRadius: 6, padding: 16, background: '#fff', maxHeight: 400, overflow: 'auto' }}
-            dangerouslySetInnerHTML={{ __html: pdfHtml }} />
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(pdfHtml) }} />
         </div>
       )}
     </div>

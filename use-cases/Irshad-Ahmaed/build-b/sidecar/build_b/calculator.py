@@ -91,12 +91,14 @@ def compute_tco(inputs: CalculatorInputs) -> CalculatorResults:
 
     savings = build_total - buy_total
 
-    # Payback: when does the buy path break even vs build?
-    if buy_annual > 0:
-        net_annual_savings = (build_total - buy_total) / inputs.horizon_years
-        payback_months = (buy_total / net_annual_savings) * 12 if net_annual_savings > 0 else None
+    # Payback: how many months for operating savings to recoup the build investment
+    build_operating_annual = build_maintenance_annual + build_infra_annual
+    buy_annual_operating = buy_annual
+    annual_operating_savings = build_operating_annual - buy_annual_operating
+    if annual_operating_savings > 0:
+        payback_months = int((build_one_time / annual_operating_savings) * 12)
     else:
-        payback_months = None  # free tier — no payback
+        payback_months = None  # build is cheaper to operate — no payback
 
     return CalculatorResults(
         build_one_time=build_one_time,

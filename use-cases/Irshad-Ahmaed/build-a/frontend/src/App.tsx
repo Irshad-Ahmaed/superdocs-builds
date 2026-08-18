@@ -2,7 +2,7 @@ import { useState, useRef } from 'react'
 import DOMPurify from 'dompurify'
 
 type Step = 'idle' | 'running' | 'done' | 'error'
-type PipelineStep = 'load-edit' | 'apparatus' | 'stamp' | 'done'
+type PipelineStep = 'idle' | 'load-edit' | 'apparatus' | 'stamp' | 'done'
 
 interface DiffEntry {
   position: number
@@ -34,6 +34,8 @@ interface StampResult {
   header_text: string
   footer_text: string
   ops_used: number
+  verified_header: boolean
+  verified_footer: boolean
 }
 
 const API = '/api'
@@ -179,64 +181,61 @@ function App() {
       runningOps += loadEdit.ops_used
       setTotalOps(runningOps)
 
-      // ── Step 2: Apparatus (diff + inject) ──
+      // ── Step 2+3: Apparatus + Stamp in parallel ──
       setPipelineStep('apparatus')
       const t2 = Date.now()
-      addLog('Step 2/3: Running local diff + generating apparatus instructions...')
+      addLog('Step 2/3: Apparatus + Stamp running in parallel...')
 
-      const appRes = await fetch(`${API}/step/apparatus`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: sid,
-          pre_edit_html: SAMPLE_HTML,
-          post_edit_html: loadEdit.post_edit_html,
-          revision_number: revisionNumber,
-          date: date,
-          changes: changes,
-          highlights_summary: 'Crew requirement increased from 2 to 3 for long-haul flights; type rating mandate added',
+      const [appRes, stampRes] = await Promise.all([
+        fetch(`${API}/step/apparatus`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: sid,
+            pre_edit_html: SAMPLE_HTML,
+            post_edit_html: loadEdit.post_edit_html,
+            revision_number: revisionNumber,
+            date: date,
+            changes: changes,
+            highlights_summary: 'Crew requirement increased from 2 to 3 for long-haul flights; type rating mandate added',
+          }),
         }),
-      })
+        fetch(`${API}/stamp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: sid,
+            revision_number: revisionNumber,
+            date: date,
+          }),
+        }),
+      ])
+
       if (!appRes.ok) throw new Error(`Apparatus failed: ${appRes.statusText}`)
-      const apparatus = await appRes.json() as ApparatusResult
+      if (!stampRes.ok) throw new Error(`Stamp failed: ${stampRes.statusText}`)
+
+      const [apparatus, stamp] = await Promise.all([
+        appRes.json() as Promise<ApparatusResult>,
+        stampRes.json() as Promise<StampResult>,
+      ])
+
       if (!apparatus.success) throw new Error(apparatus.errors.join(', '))
 
       const t2Done = Date.now()
       setStepTimers(prev => ({ ...prev, 'apparatus': t2Done - t2 }))
-      addLog(`Step 2 complete in ${timeSince(t2)} — ${apparatus.changes_count} changes, ${apparatus.ops_used} op(s), ${apparatus.apparatus_instructions.length} batch(es)`)
+      addLog(`Apparatus: ${apparatus.changes_count} changes, ${apparatus.ops_used} op(s)`)
+      addLog(`Stamp: ${stamp.header_text} — ${stamp.footer_text}`)
+      addLog(`  Header verified: ${stamp.verified_header ? '✓' : '✗'}`)
+      addLog(`  Footer verified: ${stamp.verified_footer ? '✓' : '✗ — check document manually'}`)
       setDiffEntries(apparatus.diff_entries)
       setApparatusInstructions(apparatus.apparatus_instructions)
-      runningOps += apparatus.ops_used
-      setTotalOps(runningOps)
-
-      // ── Step 3: Stamp ──
-      setPipelineStep('stamp')
-      const t3 = Date.now()
-      addLog('Step 3/3: Stamping headers and footers...')
-
-      const stampRes = await fetch(`${API}/stamp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: sid,
-          revision_number: revisionNumber,
-          date: date,
-        }),
-      })
-      if (!stampRes.ok) throw new Error(`Stamp failed: ${stampRes.statusText}`)
-      const stamp = await stampRes.json() as StampResult
-
-      const t3Done = Date.now()
-      setStepTimers(prev => ({ ...prev, 'stamp': t3Done - t3 }))
-      addLog(`Step 3 complete in ${timeSince(t3)} — 1 op. Header: ${stamp.header_text}`)
-      addLog(`Footer: ${stamp.footer_text}`)
       setStampResult(stamp)
-      runningOps += stamp.ops_used
+      runningOps += apparatus.ops_used + stamp.ops_used
       setTotalOps(runningOps)
 
       setPipelineStep('done')
       stopTimer()
-      const totalTime = ((t3Done - t1) / 1000).toFixed(1)
+      const totalTime = ((t2Done - t1) / 1000).toFixed(1)
       addLog(`All done in ${totalTime}s — ${runningOps} total ops`)
       setStep('done')
     } catch (e) {
@@ -391,11 +390,13 @@ function App() {
               <h3 style={{ marginTop: 0, color: '#166534' }}>Header/Footer Stamped</h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
-                  <div style={{ fontSize: 12, color: '#666' }}>Header</div>
+                  <div style={{ fontSize: 12, color: '#666' }}>Header {stampResult.verified_header ? '✓ verified' : '— unverified'}</div>
                   <div style={{ fontWeight: 600 }}>{stampResult.header_text}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 12, color: '#666' }}>Footer</div>
+                  <div style={{ fontSize: 12, color: stampResult.verified_footer ? '#666' : '#d97706' }}>
+                    Footer {stampResult.verified_footer ? '✓ verified' : '⚠ unverified — check PDF'}
+                  </div>
                   <div style={{ fontWeight: 600 }}>{stampResult.footer_text}</div>
                 </div>
               </div>

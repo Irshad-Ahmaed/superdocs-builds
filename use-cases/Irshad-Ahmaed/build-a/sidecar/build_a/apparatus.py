@@ -80,34 +80,31 @@ class InstructionBatch:
 class RevisionApparatus:
     """Generates and injects revision apparatus via SuperDocs chat instructions.
 
-    Supports chunking: if >25 changed paragraphs, splits instructions across
-    multiple chat turns to respect the 25-section limit.
+    Combines all instructions (record table, highlights, change bars) into a
+    single chat turn when ≤25 changed paragraphs, minimizing API calls.
     """
 
     def generate(self, diff: DiffResult, metadata: RevisionMetadata) -> list[InstructionBatch]:
         """Generate instruction batches from diff output and metadata.
 
-        Returns a list of InstructionBatch objects — one per chat turn needed.
+        Returns a single batch when all instructions fit within the 25-section limit.
         """
         positions = diff.changed_positions
         batches: list[InstructionBatch] = []
 
-        # Batch 1: revision record table + highlights (always fits in one turn)
-        batch = InstructionBatch(instructions=[
+        # Combine everything into one batch when possible
+        instructions = [
             _build_record_table_instruction(metadata),
             _build_highlights_instruction(metadata),
-        ])
-        batches.append(batch)
+        ]
 
-        # Subsequent batches: change bars, chunked by MAX_SECTIONS_PER_TURN
         if positions:
+            # Chunk change bars if >25 paragraphs
             for i in range(0, len(positions), MAX_SECTIONS_PER_TURN):
                 chunk = positions[i : i + MAX_SECTIONS_PER_TURN]
-                batch = InstructionBatch(instructions=[
-                    _build_change_bars_instruction(chunk),
-                ])
-                batches.append(batch)
+                instructions.append(_build_change_bars_instruction(chunk))
 
+        batches.append(InstructionBatch(instructions=instructions))
         return batches
 
     def generate_combined(self, diff: DiffResult, metadata: RevisionMetadata) -> list[str]:

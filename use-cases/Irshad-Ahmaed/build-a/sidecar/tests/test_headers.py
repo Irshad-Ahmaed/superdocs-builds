@@ -129,7 +129,7 @@ async def test_export_falls_back_to_presigned_url(tmp_path) -> None:
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_export_records_zero_ops() -> None:
+async def test_export_records_zero_ops(tmp_path: Path) -> None:
     """Export is free — tracker should not increase for export ops."""
     async with SuperDocsClient(api_key=TEST_API_KEY) as client:
         respx.post("https://api.superdocs.app/v1/documents/export").mock(
@@ -142,6 +142,6 @@ async def test_export_records_zero_ops() -> None:
         )
         initial_ops = client.tracker.total_ops
         exporter = ControlledExporter(client)
-        await exporter.export_pdf("test-session", Path("/tmp/test.pdf"))
+        await exporter.export_pdf("test-session", tmp_path / "test.pdf")
         # export() = 0 ops, download = 0 ops
         assert client.tracker.total_ops == initial_ops

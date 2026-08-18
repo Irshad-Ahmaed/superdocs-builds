@@ -60,8 +60,11 @@ def test_chunks_when_exceeding_limit() -> None:
     apparatus = RevisionApparatus()
     batches = apparatus.generate(diff, metadata)
 
-    # Should have: 1 (record+highlights) + 2 (chunked bars) = 3 batches
-    assert len(batches) >= 3
+    # Everything combined into 1 batch; change bars chunked within it
+    assert len(batches) == 1
+    combined = batches[0].combined
+    # Should have 2 change bar instructions (25 + 5)
+    assert combined.count("change bar") == 2
 
 
 def test_no_changes_generates_only_record() -> None:
@@ -103,8 +106,10 @@ def test_exact_25_sections_no_chunking() -> None:
     apparatus = RevisionApparatus()
     batches = apparatus.generate(diff, metadata)
 
-    # 1 (record+highlights) + 1 (25 bars) = 2 batches
-    assert len(batches) == 2
+    # Everything in 1 batch; 1 change bar instruction (25 sections fit in one)
+    assert len(batches) == 1
+    combined = batches[0].combined
+    assert combined.count("change bar") == 1
 
 
 def test_26_sections_chunks_into_two() -> None:
@@ -117,5 +122,7 @@ def test_26_sections_chunks_into_two() -> None:
     apparatus = RevisionApparatus()
     batches = apparatus.generate(diff, metadata)
 
-    # 1 (record+highlights) + 2 (25+1 bars) = 3 batches
-    assert len(batches) == 3
+    # Everything in 1 batch; 2 change bar instructions (25 + 1)
+    assert len(batches) == 1
+    combined = batches[0].combined
+    assert combined.count("change bar") == 2
