@@ -216,7 +216,6 @@ async def step_apparatus(req: ApparatusRequest) -> ApparatusResponse:
         # Combine apparatus + stamp into a single edit call
         combined_instruction = " ".join(instructions)
         if req.include_stamp:
-            from .headers import HeaderFooterStamper
             stamper = HeaderFooterStamper.__new__(HeaderFooterStamper)
             stamp_instruction = stamper.build_combined_instruction(req.revision_number, req.date)
             combined_instruction += f" {stamp_instruction}"

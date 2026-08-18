@@ -114,7 +114,7 @@ class SessionInfo(BaseModel):
 
 class SessionHistory(BaseModel):
     session_id: str
-    entries: list[dict[str, Any]] = Field(default_factory=list)
+    messages: list[dict[str, Any]] = Field(default_factory=list)
     document_state: dict[str, Any] | None = None
     editor_action: str = "keep"
 
@@ -312,6 +312,33 @@ class SuperDocsClient:
         resp = await self._post(f"/v1/chat/{session_id}/continue", payload)
         self.tracker.record("continue_prompt", 0, f"continue={should_continue}")
         return resp
+
+    async def list_session_documents(
+        self, session_id: str, include_html: bool = False
+    ) -> list[dict[str, Any]]:
+        """List documents open in a session (0 ops)."""
+        params: dict[str, Any] = {}
+        if include_html:
+            params["include_html"] = "true"
+        resp = await self._get(f"/v1/sessions/{session_id}/documents", params=params)
+        self.tracker.record("list_session_documents", 0, f"session={session_id}")
+        return resp.get("documents", []) if isinstance(resp, dict) else resp
+
+    async def update_document_parts(
+        self, document_id: str, parts: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Update out-of-flow parts (headers, footers, etc.) on a saved document (0 ops).
+
+        Uses PATCH /v1/documents/{document_id} with parts payload.
+        Headers/footers use <span data-field="PAGE|NUMPAGES|DATE"> for dynamic fields.
+        """
+        payload: dict[str, Any] = {"parts": parts}
+        resp = await self._patch(f"/v1/documents/{document_id}", payload)
+        self.tracker.record("update_document_parts", 0, f"doc={document_id}")
+        return resp
+
+    async def _patch(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._request_with_retry("PATCH", path, json=payload)
 
     async def rename_document(self, session_id: str, title: str) -> dict[str, Any]:
         """Rename a document (0 ops). Note: for renaming ONLY — headers/footers via chat."""
