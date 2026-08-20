@@ -91,3 +91,20 @@ async def test_export_requires_session_or_html() -> None:
     async with SuperDocsClient(api_key="sk_test_key") as client:
         with pytest.raises(SuperDocsError, match="requires either"):
             await client.export()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_export_handles_direct_binary_pdf() -> None:
+    respx.post("https://api.superdocs.app/v1/documents/export").mock(
+        return_value=httpx.Response(
+            200,
+            headers={"content-type": "application/pdf"},
+            content=b"%PDF-1.4 binary content \xd3\xff",
+        )
+    )
+    async with SuperDocsClient(api_key="sk_test_key") as client:
+        result = await client.export(session_id="test-session", format="pdf")
+        assert result.content == b"%PDF-1.4 binary content \xd3\xff"
+        assert result.download_url is None
+        assert client.tracker.total_ops == 0

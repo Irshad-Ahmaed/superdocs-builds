@@ -30,6 +30,7 @@ interface ApparatusResult {
   total_paragraphs_old: number
   total_paragraphs_new: number
   errors: string[]
+  updated_html?: string
 }
 
 interface StampResult {
@@ -87,14 +88,28 @@ function DiffView({ entries }: { entries: DiffEntry[] }) {
   )
 }
 
-function DocumentPreview({ html, label }: { html: string; label: string }) {
+function DocumentPreview({ html, label, stamp }: { html: string; label: string; stamp?: StampResult | null }) {
   return (
     <div>
       <div style={{ fontSize: 12, fontWeight: 600, color: '#666', marginBottom: 4 }}>{label}</div>
-      <div
-        style={{ border: '1px solid #ddd', borderRadius: 6, padding: 16, background: '#fff', fontFamily: 'serif', fontSize: 14, lineHeight: 1.6, maxHeight: 250, overflow: 'auto' }}
-        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }}
-      />
+      <div style={{ border: '1px solid #ddd', borderRadius: 6, background: '#fff', overflow: 'hidden' }}>
+        {stamp && (
+          <div style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', padding: '6px 16px', fontSize: 11, color: '#64748b', display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace' }}>
+            <span>{stamp.header_text}</span>
+            <span>CONTROLLED REVISION</span>
+          </div>
+        )}
+        <div
+          style={{ padding: 16, fontFamily: 'serif', fontSize: 14, lineHeight: 1.6, maxHeight: 250, overflow: 'auto' }}
+          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }}
+        />
+        {stamp && (
+          <div style={{ background: '#f8fafc', borderTop: '1px solid #e2e8f0', padding: '6px 16px', fontSize: 11, color: '#64748b', display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace' }}>
+            <span>Controlled Document</span>
+            <span>{stamp.footer_text}</span>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -116,6 +131,11 @@ function App() {
   const [diffEntries, setDiffEntries] = useState<DiffEntry[]>([])
   const [apparatusInstructions, setApparatusInstructions] = useState<string[]>([])
   const [stampResult, setStampResult] = useState<StampResult | null>(null)
+  const [currentSessionId, setCurrentSessionId] = useState<string>('')
+  const [exporting, setExporting] = useState(false)
+  const [exportDownloadUrl, setExportDownloadUrl] = useState<string | null>(null)
+  const [exportedPdfPath, setExportedPdfPath] = useState<string | null>(null)
+  const [copiedPath, setCopiedPath] = useState(false)
   const [log, setLog] = useState<LogEntry[]>([])
   const [stepTimers, setStepTimers] = useState<Record<string, number>>({})
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -147,13 +167,16 @@ function App() {
     setDiffEntries([])
     setApparatusInstructions([])
     setStampResult(null)
+    setExportDownloadUrl(null)
     setLog([])
     setStepTimers({})
     startTimer()
 
     const sid = `revision-${revisionNumber}-${Date.now()}`
+    setCurrentSessionId(sid)
     const instructions = editInstructions || `Update section 4.1: change minimum crew complement from 2 pilots to 3 pilots for long-haul flights. Add a note that both pilots must hold type ratings.`
-    const changes = [editInstructions || 'Updated crew complement from 2 to 3 pilots for long-haul flights; added type rating requirement']
+    const summaryText = editInstructions || 'Updated crew complement from 2 to 3 pilots for long-haul flights; added type rating requirement'
+    const changes = [summaryText]
 
     try {
       let runningOps = 0
@@ -201,7 +224,7 @@ function App() {
           revision_number: revisionNumber,
           date: date,
           changes: changes,
-          highlights_summary: 'Crew requirement increased from 2 to 3 for long-haul flights; type rating mandate added',
+          highlights_summary: summaryText,
           include_stamp: true,
         }),
       })
@@ -215,6 +238,9 @@ function App() {
 
       setDiffEntries(apparatus.diff_entries)
       setApparatusInstructions(apparatus.apparatus_instructions)
+      if (apparatus.updated_html) {
+        setPostEditHtml(apparatus.updated_html)
+      }
       runningOps += apparatus.ops_used
 
       if (apparatus.stamp_result) {
@@ -239,7 +265,43 @@ function App() {
       setError(String(e))
       setStep('error')
       setPipelineStep('idle')
-      addLog(`Error: ${e}`)
+    }
+  }
+
+  const handleExportPdf = async () => {
+    if (!currentSessionId) return
+    setExporting(true)
+    try {
+      addLog('Exporting controlled PDF via SuperDocs API...')
+      const res = await fetch(`${API}/export`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: currentSessionId,
+          output_path: `controlled-revision-${revisionNumber}.pdf`,
+        }),
+      })
+      if (!res.ok) throw new Error(`Export failed: ${res.statusText}`)
+      const data = await res.json()
+      addLog(`Controlled PDF exported successfully: ${data.pdf_path}`)
+      setExportedPdfPath(data.pdf_path)
+
+      const downloadUrl = data.pdf_data_url || data.download_url
+      if (downloadUrl) {
+        setExportDownloadUrl(downloadUrl)
+        // Automatically trigger browser download to local machine Downloads folder
+        const link = document.createElement('a')
+        link.href = downloadUrl
+        link.download = `controlled-revision-${revisionNumber}.pdf`
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+      }
+    } catch (e) {
+      addLog(`Export error: ${e}`)
+      setError(String(e))
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -355,7 +417,7 @@ function App() {
           {postEditHtml && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
               <DocumentPreview html={preEditHtml || SAMPLE_HTML} label="BEFORE (Original)" />
-              <DocumentPreview html={postEditHtml} label="AFTER (With Revisions)" />
+              <DocumentPreview html={postEditHtml} label="AFTER (With Revisions & Stamping)" stamp={stampResult} />
             </div>
           )}
 
@@ -382,7 +444,7 @@ function App() {
 
           {/* Stamp result */}
           {stampResult && (
-            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: 16 }}>
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: 16, marginBottom: 20 }}>
               <h3 style={{ marginTop: 0, color: '#166534' }}>Header/Footer Stamped</h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
@@ -398,6 +460,101 @@ function App() {
               </div>
             </div>
           )}
+
+          {/* Export Controlled PDF */}
+          <div style={{ background: '#f8f9fa', border: '1px solid #e9ecef', borderRadius: 8, padding: 16, marginBottom: 20 }}>
+            <h3 style={{ marginTop: 0 }}>Controlled Document PDF Export</h3>
+            <p style={{ fontSize: 13, color: '#666', marginTop: 0 }}>
+              Export the finalized revision document with change bars, revision record, LEP, and revision headers/footers.
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <button
+                onClick={handleExportPdf}
+                disabled={exporting || !currentSessionId}
+                style={{
+                  padding: '10px 24px', borderRadius: 4, border: 'none',
+                  background: exporting ? '#93c5fd' : '#16a34a',
+                  color: '#fff', cursor: exporting ? 'wait' : 'pointer',
+                  fontSize: 14, fontWeight: 600,
+                }}
+              >
+                {exporting ? 'Exporting PDF via SuperDocs...' : 'Export Controlled PDF'}
+              </button>
+              {exportDownloadUrl && (
+                <a
+                  href={exportDownloadUrl}
+                  download={`controlled-revision-${revisionNumber}.pdf`}
+                  style={{
+                    padding: '10px 20px', borderRadius: 4,
+                    background: '#2563eb', color: '#fff',
+                    textDecoration: 'none', fontSize: 14, fontWeight: 600,
+                  }}
+                >
+                  Download PDF Again
+                </a>
+              )}
+            </div>
+
+            {exportedPdfPath && (
+              <div style={{
+                marginTop: 16,
+                background: '#ecfdf5',
+                border: '1px solid #6ee7b7',
+                borderRadius: 6,
+                padding: 14,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#065f46', fontWeight: 600, fontSize: 14 }}>
+                  <span>✅ PDF Downloaded &amp; Saved Successfully!</span>
+                </div>
+                <div style={{ marginTop: 8, fontSize: 13, color: '#374151' }}>
+                  <strong>Saved Location (Local Sidecar):</strong>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8, marginTop: 4,
+                    background: '#ffffff', padding: '6px 10px', borderRadius: 4,
+                    border: '1px solid #d1d5db', fontFamily: 'monospace', fontSize: 12,
+                    wordBreak: 'break-all',
+                  }}>
+                    <span style={{ flex: 1 }}>{exportedPdfPath}</span>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(exportedPdfPath)
+                        setCopiedPath(true)
+                        setTimeout(() => setCopiedPath(false), 2000)
+                      }}
+                      style={{
+                        padding: '3px 8px', fontSize: 11, background: '#f3f4f6',
+                        border: '1px solid #d1d5db', borderRadius: 3, cursor: 'pointer',
+                      }}
+                    >
+                      {copiedPath ? '✓ Copied' : 'Copy Path'}
+                    </button>
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 12, color: '#047857' }}>
+                    📥 The PDF has also been sent to your browser's <strong>Downloads</strong> folder as <code>controlled-revision-{revisionNumber}.pdf</code>.
+                  </div>
+                </div>
+
+                {exportDownloadUrl && (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+                      Embedded PDF Preview:
+                    </div>
+                    <iframe
+                      src={exportDownloadUrl}
+                      title="Controlled PDF Preview"
+                      style={{
+                        width: '100%',
+                        height: 480,
+                        border: '1px solid #d1d5db',
+                        borderRadius: 4,
+                        background: '#fff',
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

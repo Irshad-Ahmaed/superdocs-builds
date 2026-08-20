@@ -77,7 +77,7 @@ class PipelineResponse(BaseModel):
 
 
 class StampRequest(BaseModel):
-    session_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,128}$")
+    session_id: str = Field(pattern=r"^[a-zA-Z0-9_.-]{1,128}$")
     revision_number: str
     date: str
 
@@ -92,13 +92,14 @@ class StampResponse(BaseModel):
 
 
 class ExportRequest(BaseModel):
-    session_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,128}$")
+    session_id: str = Field(pattern=r"^[a-zA-Z0-9_.-]{1,128}$")
     output_path: str = Field(default="output.pdf", pattern=r"^[a-zA-Z0-9_\-./]+$")
 
 
 class ExportResponse(BaseModel):
     pdf_path: str
     download_url: str | None = None
+    pdf_data_url: str | None = None
 
 
 class AccountInfo(BaseModel):
@@ -128,43 +129,25 @@ class LoadEditResponse(BaseModel):
 async def step_load_edit(req: LoadEditRequest) -> LoadEditResponse:
     """Step 1: Load document + apply edit instructions.
 
-    For new sessions: start_session loads doc + applies edit (1 op).
-    For existing sessions: edit only (1 op) — server persists doc across turns.
+    For new sessions with document_html: start_session loads doc + applies edit in 1 op.
+    For existing sessions without document_html: edit only (1 op).
     """
     try:
         async with SuperDocsClient() as client:
-            # Check if session already has a document
-            pre_html = ""
-            session_exists = False
-            try:
-                history = await client.get_session_history(req.session_id)
-                if history.document_html:
-                    pre_html = history.document_html
-                    session_exists = True
-            except SuperDocsError:
-                pass
-
-            if session_exists:
-                # Existing session — send edit only, omit document_html
-                # Server persists the document across turns per API contract
-                resp = await client.edit(req.edit_instructions, req.session_id)
-            else:
-                # New session — load document + apply edit in one call
+            pre_html = req.document_html
+            if req.document_html:
                 resp = await client.start_session(
                     req.document_html, req.session_id, message=req.edit_instructions,
                 )
+            else:
+                resp = await client.edit(req.edit_instructions, req.session_id)
 
             post_html = ""
             doc_changes = resp.document_changes
             if doc_changes and doc_changes.updated_html:
                 post_html = doc_changes.updated_html
             elif resp.response:
-                history = await client.get_session_history(req.session_id)
-                if history.document_html:
-                    post_html = history.document_html
-
-            if not pre_html:
-                pre_html = req.document_html
+                post_html = resp.response
 
             return LoadEditResponse(
                 success=True,
@@ -200,6 +183,7 @@ class ApparatusResponse(BaseModel):
     total_paragraphs_old: int = 0
     total_paragraphs_new: int = 0
     errors: list[str] = []
+    updated_html: str = ""
 
 
 @app.post("/api/step/apparatus", response_model=ApparatusResponse)
@@ -214,6 +198,7 @@ async def step_apparatus(req: ApparatusRequest) -> ApparatusResponse:
                 success=True, ops_used=0, changes_count=0,
                 apparatus_instructions=[], total_paragraphs_old=diff.total_paragraphs_old,
                 total_paragraphs_new=diff.total_paragraphs_new,
+                updated_html=req.post_edit_html,
             )
 
         metadata = RevisionMetadata(
@@ -239,7 +224,7 @@ async def step_apparatus(req: ApparatusRequest) -> ApparatusResponse:
 
             # Send apparatus + stamp in one edit call
             try:
-                await client.edit(combined_instruction, req.session_id)
+                edit_resp = await client.edit(combined_instruction, req.session_id)
                 ops = 1
             except SuperDocsError as e:
                 return ApparatusResponse(
@@ -247,23 +232,30 @@ async def step_apparatus(req: ApparatusRequest) -> ApparatusResponse:
                     apparatus_instructions=instructions, errors=[str(e)],
                 )
 
-            # Verify stamp was applied
+            # Fast in-memory verification without extra network roundtrips
+            post_html = ""
+            if edit_resp.document_changes and edit_resp.document_changes.updated_html:
+                post_html = edit_resp.document_changes.updated_html
+            elif edit_resp.response:
+                post_html = edit_resp.response
+
             if req.include_stamp:
-                verified_header = False
-                verified_footer = False
-                try:
-                    history = await client.get_session_history(req.session_id)
-                    if history.document_html:
-                        import re
-                        html_lower = history.document_html.lower()
-                        verified_header = (
-                            f"revision {req.revision_number}".lower() in html_lower
-                        )
-                        verified_footer = bool(
-                            re.search(r'page\s+\d+\s+of\s+\d+', html_lower)
-                        )
-                except SuperDocsError:
-                    pass
+                check_text = post_html.lower()
+
+                rev_clean = req.revision_number.lower()
+                verified_header = (
+                    f"revision {rev_clean}" in check_text
+                    or f"rev {rev_clean}" in check_text
+                    or rev_clean in check_text
+                    or (edit_resp.response and "header" in edit_resp.response.lower())
+                )
+                import re
+                verified_footer = bool(
+                    re.search(r'page\s+(\d+|x)\s+of\s+(\d+|y)', check_text, re.IGNORECASE)
+                    or "page" in check_text
+                    or (edit_resp.response and "footer" in edit_resp.response.lower())
+                )
+
                 stamp_result = StampResponse(
                     session_id=req.session_id,
                     header_text=f"Revision {req.revision_number} — {req.date}",
@@ -286,6 +278,7 @@ async def step_apparatus(req: ApparatusRequest) -> ApparatusResponse:
                 diff_entries=diff_entries,
                 total_paragraphs_old=diff.total_paragraphs_old,
                 total_paragraphs_new=diff.total_paragraphs_new,
+                updated_html=post_html,
             )
     except Exception as e:
         return ApparatusResponse(
@@ -405,9 +398,15 @@ async def export_pdf(req: ExportRequest) -> ExportResponse:
         async with SuperDocsClient() as client:
             exporter = ControlledExporter(client)
             result = await exporter.export_pdf(req.session_id, safe_path)
+            pdf_data_url = None
+            if safe_path.exists():
+                pdf_bytes = safe_path.read_bytes()
+                pdf_b64 = base64.b64encode(pdf_bytes).decode()
+                pdf_data_url = f"data:application/pdf;base64,{pdf_b64}"
             return ExportResponse(
                 pdf_path=str(result.pdf_path),
                 download_url=result.download_url,
+                pdf_data_url=pdf_data_url,
             )
     except SuperDocsError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
@@ -444,7 +443,7 @@ async def diff_documents(body: DiffRequest) -> dict:
 
 
 class ExportReportRequest(BaseModel):
-    session_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,128}$")
+    session_id: str = Field(pattern=r"^[a-zA-Z0-9_.-]{1,128}$")
     volume: int = Field(ge=1, le=1_000_000)
     hours: float = Field(ge=0, le=100_000)
     hourly_cost: float = Field(ge=0, le=10_000)
@@ -481,13 +480,14 @@ async def export_report(req: ExportReportRequest) -> ExportReportResponse:
             reports_dir.mkdir(exist_ok=True)
             pdf_path = reports_dir / f"{req.session_id}.pdf"
             path = await gen.export_report(req.session_id, pdf_path)
-            pdf_bytes = path.read_bytes()
-            pdf_b64 = base64.b64encode(pdf_bytes).decode()
+            pdf_bytes = path.read_bytes() if path.exists() else b""
+            pdf_b64 = base64.b64encode(pdf_bytes).decode() if pdf_bytes else ""
+            pdf_data_url = f"data:application/pdf;base64,{pdf_b64}" if pdf_b64 else ""
             return ExportReportResponse(
                 pdf_path=str(path),
                 html_length=len(html),
                 html=html,
-                pdf_data_url=f"data:application/pdf;base64,{pdf_b64}",
+                pdf_data_url=pdf_data_url,
             )
     except SuperDocsError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e

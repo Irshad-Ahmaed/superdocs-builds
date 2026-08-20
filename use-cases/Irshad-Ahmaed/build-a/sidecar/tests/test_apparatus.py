@@ -126,3 +126,35 @@ def test_26_sections_chunks_into_two() -> None:
     assert len(batches) == 1
     combined = batches[0].combined
     assert combined.count("change bar") == 2
+
+
+def test_generates_lep_instruction() -> None:
+    diff = _make_diff(2)
+    metadata = RevisionMetadata(
+        revision_number="0043",
+        date="2025-02-01",
+        changes=["Section 4.1 updated", "Section 4.2 updated"],
+    )
+    apparatus = RevisionApparatus()
+    batches = apparatus.generate(diff, metadata)
+
+    all_instructions = " ".join(b.combined for b in batches)
+    assert "List of Effective Pages" in all_instructions or "LEP" in all_instructions
+    assert "0043" in all_instructions
+    assert "Revised" in all_instructions
+
+
+def test_revision_record_includes_affected_pages() -> None:
+    diff = _make_diff(1)
+    metadata = RevisionMetadata(
+        revision_number="0043",
+        date="2025-02-01",
+        changes=["Updated engine failure checklist"],
+        affected_pages=["Section 4.2 (Page 7)"],
+    )
+    apparatus = RevisionApparatus()
+    batches = apparatus.generate(diff, metadata)
+
+    combined = batches[0].combined
+    assert "Affected Pages/Sections" in combined
+    assert "Section 4.2 (Page 7)" in combined

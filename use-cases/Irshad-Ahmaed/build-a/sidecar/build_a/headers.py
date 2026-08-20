@@ -43,26 +43,23 @@ class HeaderFooterStamper:
     def build_header_instruction(self, revision_number: str, date: str) -> str:
         """Build the chat instruction to set the header (fallback)."""
         return (
-            f"Set the header on every page to: "
-            f"'Revision {revision_number} — {date}'"
+            f"Add a revision header: 'Revision {revision_number} — {date}'."
         )
 
     def build_footer_instruction(self) -> str:
         """Build the chat instruction to set page-numbered footer (fallback)."""
         return (
-            "Set the footer on every page to show page numbers in the format 'Page X of Y'. "
-            "Use a consistent font and size matching the header."
+            "Add a page footer showing page numbers in the format: 'Page 1 of 1' (or dynamic 'Page X of Y')."
         )
 
     def build_combined_instruction(
         self, revision_number: str, date: str
     ) -> str:
         """Combine header + footer + page numbering into a single chat turn."""
-        header = self.build_header_instruction(revision_number, date)
-        footer = self.build_footer_instruction()
         return (
-            f"{header}. {footer}. "
-            f"Also enable decimal page numbering starting from 1 for all sections."
+            f"Update any revision reference in the main title heading to reflect Revision {revision_number}. "
+            f"Add a revision header: 'Revision {revision_number} — {date}'. "
+            f"Add a footer showing page numbers: 'Page 1 of 1' (and dynamic 'Page X of Y')."
         )
 
     async def stamp(
@@ -111,9 +108,17 @@ class ControlledExporter:
 
         Tries direct export first, falls back to pre-signed URL.
         """
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             result = await self.client.export(session_id=session_id, format="pdf")
-            if result.download_url:
+            if result.content:
+                output_path.write_bytes(result.content)
+                return ExportResult(
+                    session_id=session_id,
+                    pdf_path=output_path,
+                    download_url=None,
+                )
+            elif result.download_url:
                 await self._download(result.download_url, output_path)
                 return ExportResult(
                     session_id=session_id,

@@ -16,6 +16,7 @@ class RevisionMetadata:
     revision_number: str
     date: str
     changes: list[str] = field(default_factory=list)
+    affected_pages: list[str] = field(default_factory=list)
     highlights_summary: str = ""
 
 
@@ -29,38 +30,64 @@ def _build_change_bars_instruction(positions: list[int]) -> str:
         return ""
     pos_list = ", ".join(str(p) for p in positions)
     return (
-        f"Add vertical change bars (revision marks) in the left margin next to "
+        f"Add vertical revision change bars (solid black left border: "
+        f"border-left: 4px solid #111; padding-left: 12px;) in the left margin next to "
         f"every altered paragraph. The changed paragraphs are at positions "
-        f"[{pos_list}] (0-indexed, counting all paragraphs including headings). "
-        f"Only mark these specific paragraphs — do not add bars anywhere else."
+        f"[{pos_list}] (0-indexed). Only mark these specific altered paragraphs — "
+        f"do not add bars anywhere else."
     )
 
 
-def _build_record_table_instruction(metadata: RevisionMetadata) -> str:
+def _build_record_table_instruction(
+    metadata: RevisionMetadata, diff: DiffResult | None = None
+) -> str:
     """Build a chat instruction to insert a revision-record table."""
+    affected_str = ", ".join(metadata.affected_pages) if metadata.affected_pages else (
+        f"Paragraphs {diff.changed_positions}"
+        if diff and diff.changed_positions
+        else "All / General"
+    )
     if not metadata.changes:
         return (
-            f"Insert a revision-record table at the top of the document with these columns: "
-            f"Revision Number, Date, Summary of Change.\n"
-            f"Row: | {metadata.revision_number} | {metadata.date} | No content changes |"
+            f"At the very top of the document (replacing any existing revision tables), "
+            f"insert a 'Revision Record' table with these columns: "
+            f"Revision Number, Date, Affected Pages/Sections, Summary of Change.\n"
+            f"Row: | {metadata.revision_number} | {metadata.date} | None | No content changes |"
         )
     change_rows = "\n".join(
-        f"| {metadata.revision_number} | {metadata.date} | {c} |"
+        f"| {metadata.revision_number} | {metadata.date} | {affected_str} | {c} |"
         for c in metadata.changes
     )
     return (
-        f"Insert a revision-record table at the top of the document with these columns: "
-        f"Revision Number, Date, Summary of Change.\n"
+        f"At the very top of the document (replacing any existing revision tables), "
+        f"insert a 'Revision Record' table with these columns: "
+        f"Revision Number, Date, Affected Pages/Sections, Summary of Change.\n"
         f"Use the following rows:\n{change_rows}"
+    )
+
+
+def _build_lep_instruction(metadata: RevisionMetadata, diff: DiffResult) -> str:
+    """Build a chat instruction for the List of Effective Pages (LEP)."""
+    changed_pos = diff.changed_positions if diff else []
+    changed_pos_str = ", ".join(str(p) for p in changed_pos) if changed_pos else "None"
+    return (
+        f"Insert a 'List of Effective Pages (LEP)' table immediately after the "
+        f"Revision Record table with columns: Page/Section, Revision Number, Date, Status.\n"
+        f"Use exact rows:\n"
+        f"| Paragraphs [{changed_pos_str}] | {metadata.revision_number} | {metadata.date} | Revised |\n"
+        f"| All other sections | Original | Original Issue | Original/Prior |"
     )
 
 
 def _build_highlights_instruction(metadata: RevisionMetadata) -> str:
     """Build a chat instruction for highlights-of-change summary."""
+    summary = metadata.highlights_summary or (
+        "; ".join(metadata.changes) if metadata.changes else "Document updated per revision instructions."
+    )
     return (
-        f"Add a 'Highlights of Change' summary section after the revision-record table. "
-        f"Revision {metadata.revision_number} dated {metadata.date}. "
-        f"Summary: {metadata.highlights_summary}"
+        f"Add a 'Highlights of Change' heading and summary paragraph after the List of Effective Pages table: "
+        f"'Highlights of Change (Revision {metadata.revision_number}, {metadata.date}): {summary}', "
+        f"followed by a page break before the manual body."
     )
 
 
@@ -80,7 +107,7 @@ class InstructionBatch:
 class RevisionApparatus:
     """Generates and injects revision apparatus via SuperDocs chat instructions.
 
-    Combines all instructions (record table, highlights, change bars) into a
+    Combines all instructions (record table, LEP, highlights, change bars) into a
     single chat turn when ≤25 changed paragraphs, minimizing API calls.
     """
 
@@ -92,9 +119,10 @@ class RevisionApparatus:
         positions = diff.changed_positions
         batches: list[InstructionBatch] = []
 
-        # Combine everything into one batch when possible
+        # Combine apparatus elements into one batch when possible
         instructions = [
-            _build_record_table_instruction(metadata),
+            _build_record_table_instruction(metadata, diff),
+            _build_lep_instruction(metadata, diff),
             _build_highlights_instruction(metadata),
         ]
 

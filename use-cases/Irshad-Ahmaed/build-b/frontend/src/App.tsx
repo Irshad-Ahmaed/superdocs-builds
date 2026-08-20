@@ -54,6 +54,8 @@ function App() {
   const [downloading, setDownloading] = useState(false)
   const [pdfDataUrl, setPdfDataUrl] = useState<string | null>(null)
   const [pdfHtml, setPdfHtml] = useState<string | null>(null)
+  const [pdfPath, setPdfPath] = useState<string | null>(null)
+  const [copiedPath, setCopiedPath] = useState(false)
 
   const results = useMemo(() => {
     const buildOneTime = hours * hourlyCost
@@ -67,10 +69,14 @@ function App() {
 
     const savings = buildTotal - buyTotal
     const savingsPct = buildTotal > 0 ? Math.round((savings / buildTotal) * 100) : 0
+    const buildAnnualOp = buildMaintPerYear + buildInfraPerYear
+    const annualOpSavings = buildAnnualOp - buyAnnual
+    const buildBreakevenMonths = tier.monthly > 0 && annualOpSavings > 0 ? (buildOneTime / annualOpSavings) * 12 : null
 
     return {
       buildOneTime, buildMaintPerYear, buildInfraPerYear, buildTotal,
       buyTier: tier.name, buyAnnual, buyTotal, savings, savingsPct,
+      buildBreakevenMonths,
     }
   }, [volume, hours, hourlyCost, infra, horizon])
 
@@ -80,6 +86,7 @@ function App() {
     setDownloading(true)
     setPdfDataUrl(null)
     setPdfHtml(null)
+    setPdfPath(null)
     try {
       const res = await fetch('/api/export-report', {
         method: 'POST',
@@ -92,7 +99,17 @@ function App() {
       })
       if (!res.ok) throw new Error(`Export failed: ${res.statusText}`)
       const data = await res.json()
-      if (data.pdf_data_url) setPdfDataUrl(data.pdf_data_url)
+      if (data.pdf_data_url) {
+        setPdfDataUrl(data.pdf_data_url)
+        // Automatically trigger browser download
+        const link = document.createElement('a')
+        link.href = data.pdf_data_url
+        link.download = `superdocs-roi-report-${Date.now()}.pdf`
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+      }
+      if (data.pdf_path) setPdfPath(data.pdf_path)
       if (data.html) setPdfHtml(data.html)
     } catch (e) {
       alert(String(e))
@@ -161,7 +178,7 @@ function App() {
         </div>
       </div>
 
-      {/* Savings callout */}
+      {/* Savings & ROI Metrics Callout */}
       <div style={{
         borderRadius: 8, padding: 20, marginBottom: 20, textAlign: 'center',
         background: results.savings > 0 ? 'linear-gradient(135deg, #f0fdf4, #dcfce7)' : 'linear-gradient(135deg, #fef2f2, #fecaca)',
@@ -173,16 +190,80 @@ function App() {
         <div style={{ fontSize: 36, fontWeight: 800, color: results.savings > 0 ? '#15803d' : '#dc2626' }}>
           {fmt(Math.abs(results.savings))}
         </div>
-        <div style={{ fontSize: 14, color: '#666' }}>
-          {results.savings > 0 ? `${results.savingsPct}% savings over ${horizon} years` : `building costs less over ${horizon} years`}
+        <div style={{ fontSize: 14, color: '#666', marginBottom: 12 }}>
+          {results.savings > 0 ? `${results.savingsPct}% net savings over ${horizon} years` : `building costs less over ${horizon} years`}
         </div>
+        {results.savings > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 24, fontSize: 12, color: '#047857', borderTop: '1px solid #bbf7d0', paddingTop: 10 }}>
+            <div><strong>SuperDocs Payback:</strong> Immediate (Day 1 — $0 CapEx)</div>
+            {results.buildBreakevenMonths && (
+              <div><strong>In-House Break-Even:</strong> {results.buildBreakevenMonths.toFixed(1)} months</div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Export button */}
-      <button onClick={handleDownload} disabled={downloading}
-        style={{ padding: '10px 28px', borderRadius: 4, border: 'none', background: downloading ? '#93c5fd' : '#2563eb', color: '#fff', cursor: downloading ? 'wait' : 'pointer', fontSize: 14, fontWeight: 600, marginBottom: 20 }}>
-        {downloading ? 'Generating PDF Report...' : 'Generate PDF Report via SuperDocs'}
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+        <button onClick={handleDownload} disabled={downloading}
+          style={{ padding: '10px 28px', borderRadius: 4, border: 'none', background: downloading ? '#93c5fd' : '#2563eb', color: '#fff', cursor: downloading ? 'wait' : 'pointer', fontSize: 14, fontWeight: 600 }}>
+          {downloading ? 'Generating PDF Report...' : 'Generate PDF Report via SuperDocs'}
+        </button>
+        {pdfDataUrl && (
+          <a
+            href={pdfDataUrl}
+            download={`superdocs-roi-report-${Date.now()}.pdf`}
+            style={{
+              padding: '10px 20px', borderRadius: 4,
+              background: '#16a34a', color: '#fff',
+              textDecoration: 'none', fontSize: 14, fontWeight: 600,
+            }}
+          >
+            Download PDF Again
+          </a>
+        )}
+      </div>
+
+      {pdfPath && (
+        <div style={{
+          marginBottom: 20,
+          background: '#ecfdf5',
+          border: '1px solid #6ee7b7',
+          borderRadius: 6,
+          padding: 14,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#065f46', fontWeight: 600, fontSize: 14 }}>
+            <span>✅ ROI Report PDF Generated &amp; Downloaded Successfully!</span>
+          </div>
+          <div style={{ marginTop: 8, fontSize: 13, color: '#374151' }}>
+            <strong>Saved Location (Local Sidecar):</strong>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, marginTop: 4,
+              background: '#ffffff', padding: '6px 10px', borderRadius: 4,
+              border: '1px solid #d1d5db', fontFamily: 'monospace', fontSize: 12,
+              wordBreak: 'break-all',
+            }}>
+              <span style={{ flex: 1 }}>{pdfPath}</span>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(pdfPath)
+                  setCopiedPath(true)
+                  setTimeout(() => setCopiedPath(false), 2000)
+                }}
+                style={{
+                  padding: '3px 8px', fontSize: 11, background: '#f3f4f6',
+                  border: '1px solid #d1d5db', borderRadius: 3, cursor: 'pointer',
+                }}
+              >
+                {copiedPath ? '✓ Copied' : 'Copy Path'}
+              </button>
+            </div>
+            <div style={{ marginTop: 6, fontSize: 12, color: '#047857' }}>
+              📥 The PDF has also been sent to your browser's <strong>Downloads</strong> folder.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* PDF preview */}
       {pdfDataUrl && (

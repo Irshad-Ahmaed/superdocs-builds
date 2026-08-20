@@ -101,8 +101,8 @@ def verify_numbers(
         return report
 
     full_text = ""
-    for page in doc:
-        full_text += page.get_text()
+    for page_idx in range(len(doc)):
+        full_text += doc[page_idx].get_text()
     doc.close()
 
     pdf_dollars = extract_dollar_amounts(full_text)

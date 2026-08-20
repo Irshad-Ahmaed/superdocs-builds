@@ -64,6 +64,7 @@ class ChatResponse(BaseModel):
 class ExportResponse(BaseModel):
     download_url: str | None = None
     format: str | None = None
+    content: bytes | None = None
 
 
 class JobResult(BaseModel):
@@ -262,7 +263,10 @@ class SuperDocsClient:
     async def export(
         self, session_id: str | None = None, format: str = "pdf", html: str | None = None
     ) -> ExportResponse:
-        """Export a finished file (0 ops)."""
+        """Export a finished file (0 ops).
+
+        Handles direct binary responses (PDF/bytes) as well as JSON responses with download_url.
+        """
         if not session_id and not html:
             raise SuperDocsError("export() requires either session_id or html")
         payload: dict[str, Any] = {"format": format}
@@ -270,9 +274,25 @@ class SuperDocsClient:
             payload["session_id"] = session_id
         if html:
             payload["html"] = html
-        resp = await self._post("/v1/documents/export", payload)
+        resp = await self._raw_request_with_retry("POST", "/v1/documents/export", json=payload)
         self.tracker.record("export", 0, f"format={format}")
-        return ExportResponse.model_validate(resp)
+
+        content_type = resp.headers.get("content-type", "").lower()
+        if (
+            "application/pdf" in content_type
+            or "application/octet-stream" in content_type
+            or resp.content.startswith(b"%PDF")
+        ):
+            return ExportResponse(content=resp.content, format=format)
+
+        try:
+            data = resp.json()
+            if isinstance(data, dict):
+                return ExportResponse.model_validate(data)
+        except Exception:
+            pass
+
+        return ExportResponse(content=resp.content, format=format)
 
     # --- Additional operations ---
 
@@ -451,13 +471,13 @@ class SuperDocsClient:
     ) -> dict[str, Any]:
         return await self._request_with_retry("GET", path, params=params)
 
-    async def _request_with_retry(
+    async def _raw_request_with_retry(
         self,
         method: str,
         path: str,
         max_retries: int = 2,
         **kwargs: Any,
-    ) -> dict[str, Any]:
+    ) -> httpx.Response:
         last_exc: Exception | None = None
         for attempt in range(max_retries + 1):
             try:
@@ -474,7 +494,7 @@ class SuperDocsClient:
                         await asyncio.sleep(wait)
                     continue
                 resp.raise_for_status()
-                return resp.json()
+                return resp
             except AuthError:
                 raise
             except httpx.TimeoutException as exc:
@@ -487,3 +507,13 @@ class SuperDocsClient:
                 last_exc = SuperDocsError(f"HTTP {exc.response.status_code}: {exc.response.text}")
                 break
         raise last_exc or SuperDocsError("Request failed")
+
+    async def _request_with_retry(
+        self,
+        method: str,
+        path: str,
+        max_retries: int = 2,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        resp = await self._raw_request_with_retry(method, path, max_retries=max_retries, **kwargs)
+        return resp.json()

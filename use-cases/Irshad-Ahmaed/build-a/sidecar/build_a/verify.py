@@ -69,14 +69,22 @@ def verify_pdf(
 
     # Check: revision-record table present
     full_text = ""
-    for page in doc:
-        full_text += page.get_text()
+    for page_idx in range(len(doc)):
+        full_text += doc[page_idx].get_text()
 
     has_table = "revision number" in full_text.lower() or "revision record" in full_text.lower()
     report.checks.append(VerificationCheck(
         name="Revision-record table",
         passed=has_table,
         details="Table found" if has_table else "No revision-record table detected",
+    ))
+
+    # Check: List of Effective Pages (LEP) present
+    has_lep = "effective pages" in full_text.lower() or "lep" in full_text.lower()
+    report.checks.append(VerificationCheck(
+        name="List of Effective Pages (LEP)",
+        passed=has_lep,
+        details="LEP table found" if has_lep else "No LEP table detected",
     ))
 
     # Check: revision identity in headers/footers
