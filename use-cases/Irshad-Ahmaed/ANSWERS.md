@@ -12,7 +12,10 @@
 2. **Angle-Bracket Token Stripping in Chat Turns**:
    * *Issue:* Prompting SuperDocs with `<PAGE>` or `<NUMPAGES>` in natural language chat turns caused the cloud LLM to strip the angle brackets as raw HTML/XML tags and inject the literal phrase `"Page of"` into the document body.
    * *Fix:* Decoupled natural language revision commands from dynamic pagination tokens; layered with PyMuPDF dynamic footer stamping.
-3. **Cold-Start Session Latency**:
+3. **LLM LaTeX Math Delimiter Drift**:
+   * *Issue:* When synthesizing STEM formulas, LLM turns unpredictably switch between LaTeX bracket notation (`\(...\)`, `\[...\]`) and standard Markdown dollar notation (`$...$`, `$$...$$`), breaking client-side KaTeX rendering.
+   * *Fix:* Implemented a strict server-side Regex normalizer in `build_c/guide_generator.py` converting all bracket formats to standard Markdown before frontend delivery.
+4. **Cold-Start Session Latency**:
    * *Issue:* The initial request on a fresh session can take 20–30s with zero streaming progress while models warm up.
    * *Fix:* Implemented pre-seeded HTML document templates (`build_report_template`) and client-side animated progress indicators to eliminate dead time.
 

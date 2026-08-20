@@ -2,7 +2,7 @@
 
 **Candidate:** Irshad Ahmad  
 **Repository:** [github.com/Irshad-Ahmaed/doctask-irshad-ahmad](https://github.com/Irshad-Ahmaed/doctask-irshad-ahmad)  
-**Public Builds:** `use-cases/Irshad-Ahmaed/build-a` & `use-cases/Irshad-Ahmaed/build-b`  
+**Public Builds:** `use-cases/Irshad-Ahmaed/build-a`, `build-b`, & `build-c` (Open Task List)  
 
 ---
 
@@ -21,6 +21,10 @@ Serves **Technical Publications Specialists** in commercial aviation managing Fl
 Serves **Technology Leadership & Procurement Executives** evaluating custom AI document pipelines vs. SuperDocs.
 - **Functionality:** Live, reactive Total Cost of Ownership (TCO) calculator comparing CapEx, maintenance, and infrastructure against SuperDocs tiers (Free, Plus, Pro). Compiles and exports an executive branded PDF report via the SuperDocs Cloud API with exact matching figures and $0 CapEx analysis.
 
+### Task 2 Build C: Study-Guide & Equation-Bearing Revision Synthesizer (Open Task List Band S2)
+Serves **EdTech Tutors, University STEM Students, and Civil Services Aspirants** (e.g. *Anthroholic / AnswerWriting.com*).
+- **Functionality:** Ingests raw, unorganized lecture notes and shorthand formulas (e.g. Maxwell's equations, Black-Scholes, Master Theorem) and synthesizes a structured 4-tier pedagogical guide (Formula & Definition Matrix, Cornell Conceptual Breakdown, Feynman Intuitive Explanations, and Active Recall Practice Quiz). Exports publication-grade vector PDFs with KaTeX math rendering, running headers, and centered page footers.
+
 ---
 
 ## 2. Technical Architecture & Engineering Decisions
@@ -28,19 +32,20 @@ Serves **Technology Leadership & Procurement Executives** evaluating custom AI d
 ```mermaid
 flowchart TB
     subgraph ClientLayer ["Client & Interface Surface"]
-        WebUI["React 18 + Vite Review UI (Port 3000 / 5173 / 5174)"]
-        MCPClient["MCP Client / Agent (Port 9000 SSE)"]
-        CLI["FastAPI REST Client (Port 8000)"]
+        WebA["Build A: Aviation FCOM UI (Port 5173)"]
+        WebB["Build B: FinOps ROI UI (Port 5174)"]
+        WebC["Build C: Study Guide UI (Port 5175)"]
+        DocTaskUI["DocTask Review UI (Port 3000)"]
     end
 
-    subgraph CoreEngine ["Agentic Orchestration & Pipelines"]
-        LangGraph["LangGraph / Pipeline Orchestrator"]
-        StateCheckpointer["State Checkpointer (PostgreSQL / JSON Memory)"]
-        GateEngine["Human Gate Queue (Approve / Reject / Blast Radius)"]
-        RuleEngine["Governance Rule Evaluator (Regex + Hybrid + LLM)"]
+    subgraph CoreEngine ["Modular Sidecar Hub (Port 8000)"]
+        RouterA["build_a/router.py (/api/step/*, /api/export)"]
+        RouterB["build_b/router.py (/api/export-report)"]
+        RouterC["build_c/router.py (/api/study-guide/*)"]
     end
 
     subgraph DocumentLayer ["Document Processing & Stamping"]
+        MathNorm["LaTeX Delimiter Normalizer ($$, $)"]
         DocDiffer["Paragraph AST Differ & Redline Engine"]
         Apparatus["LEP & Revision Record Generator"]
         PyMuPDF["PyMuPDF Centered Stamping & Redaction Engine"]
@@ -55,16 +60,16 @@ flowchart TB
 
 ## 3. Key Trade-offs & Defended Design Calls
 
-1. **State Persistence vs. Zero-Dependency Boot**:
-   * *Decision:* Implemented a dual storage provider (`PostgreSQL + pgvector` for production Docker deployments, with an automated fallback to in-memory/JSON store for zero-setup offline test suites).
-   * *Trade-off:* Adds conditional backend storage branches, but guarantees that `docker compose up` and `pytest` work 100% offline out-of-the-box in seconds without requiring live database credentials.
+1. **Modular APIRouter Hub vs Monolithic Server**:
+   * *Decision:* Decoupled each build into dedicated `APIRouter` modules (`build_a/router.py`, `build_b/router.py`, `build_c/router.py`) orchestrated by a lightweight ~70-line `server.py`.
+   * *Trade-off:* Adds a router file per build, but ensures 100% route isolation, zero name collisions, and independent testability.
 
-2. **Deterministic Differ vs. Generative LLM Rewriting**:
-   * *Decision:* In Build A, paragraph-level AST diffing and change-bar placement are computed deterministically on the sidecar before prompting SuperDocs.
-   * *Trade-off:* Requires custom DOM AST normalization, but eliminates hallucinated diffs, avoids empty diff cards, and guarantees 100% alignment between change bars and real document modifications.
+2. **LLM Math Delimiter Normalization (`\(` $\rightarrow$ `$`, `\[` $\rightarrow$ `$$`)**:
+   * *Decision:* In Build C, implemented regex pre-processing to normalize all unpredictable LLM equation formats into standard Markdown delimiters before sending to the frontend.
+   * *Trade-off:* Microsecond server-side pass, but completely prevents KaTeX frontend parse errors and layout crashes.
 
 3. **Atomic PDF Stamping & Margin Redaction Guarantee**:
-   * *Decision:* Layered SuperDocs Cloud PDF export with PyMuPDF dynamic footer centering and stray artifact redaction.
+   * *Decision:* Layered SuperDocs Cloud PDF export with PyMuPDF dynamic footer centering and bottom-margin artifact redaction.
    * *Trade-off:* Incorporates a secondary PyMuPDF processing pass, but guarantees that physical page numbers (`Page 1 of 2`) are mathematically centered on every page margin and stray prompt artifacts (`Page of`) are eliminated.
 
 ---
@@ -73,7 +78,7 @@ flowchart TB
 
 - **Automated Test Coverage**:
   - Task 1 Backend (`doctask`): **116/116 unit & integration tests passing in 34.35s** (100% pass rate).
-  - Build A Sidecar (`build-a`): **41/41 tests passing in 1.76s** (100% pass rate).
-  - Build B Sidecar (`build-b`): **20/20 tests passing in 0.45s** (100% pass rate).
+  - Sidecar Unified Test Suite: **50/50 tests passing in 2.63s** (41 Build A + 5 Router Integration + 4 Build C).
 - **Zero-Key Execution**: All test suites and local demos run offline without live API keys or paid credits.
-- **Frontend Quality**: Zero TypeScript errors (`tsc && vite build`) across all 3 web interfaces.
+- **Frontend Quality**: Zero TypeScript errors (`tsc && vite build`) across all 4 web interfaces.
+
