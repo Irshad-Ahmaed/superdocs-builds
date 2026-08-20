@@ -1,6 +1,16 @@
 # SuperDocs Real-World Use Cases
 
-## 1. Legal / Contract Operations
+## 1. EdTech & Competitive Exam Prep — Student Notes Synthesis, Daily Answer Writing & Model Answers
+
+**Use Case:** High-yield student note-making, structured subject summary consolidation, Daily Answer Writing (DAW) iterations, and model answer drafting for high-stakes competitive examinations (such as UPSC Civil Services and State PCS Mains, including specialized optional subjects like Anthropology). Aspirants synthesize dense standard textbooks (e.g., Ember & Ember, Nadeem Hasnain, IGNOU materials) into consolidated, syllabus-mapped notes. They write daily long-form analytical answers requiring multi-stage feedback: structural refinement, incorporation of relevant case studies, committee recommendations, and value-addition keywords. SuperDocs provides session-based document refinement, allowing students and educators to iterate directly on written drafts without fragmented copy-pasting, approve targeted structural improvements, and export clean, revision-stamped PDF summaries.
+
+**Buyer:** **Anthroholic (AnswerWriting.com)** — *Founder / Head of Product & Academic Content*. Anthroholic and its AI evaluation sister platform AnswerWriting.com serve thousands of civil services aspirants with specialized Anthropology test series, structured daily answer writing programs, and AI-driven evaluation for essay and general studies papers.
+
+**Why SuperDocs fits:** SuperDocs' document-centric AI editing transforms passive chat responses into active, in-place document creation. Aspirants can load an initial answer draft or raw study notes, prompt SuperDocs to inject missing subheadings, structural frameworks (intro-body-conclusion), and relevant ethnographic case studies or schematics, review the diffs in-place, and export publication-grade, controlled PDF model answer compilations and revision cheat-sheets ready for offline study and print.
+
+---
+
+## 2. Legal / Contract Operations
 
 **Use Case:** Contract review + revision cycles. Legal teams juggle redlines across multiple parties, version control is chaotic (email attachments, track changes conflicts), and exporting final executed PDFs requires manual formatting. SuperDocs provides session-based editing so all parties work from one source of truth, AI flags risky clauses and suggests standard language, revision history is fully auditable, and controlled PDF export ensures only the final approved version leaves the firm.
 
@@ -10,7 +20,7 @@
 
 ---
 
-## 2. Aviation / Technical Publications
+## 3. Aviation / Technical Publications
 
 **Use Case:** Controlled revisions and change bars for aircraft maintenance manuals, flight crew operating manuals (FCOMs), and AMM updates. Airlines must reconcile OEM document revisions (e.g., Boeing XML TechPubs) with airline-specific customizations, maintain FAA/EASA compliance, and distribute role-specific versions to pilots, mechanics, and ops teams. SuperDocs enables revision comparison, change-barred exports, and controlled PDF distribution with audit trails.
 
@@ -20,7 +30,7 @@
 
 ---
 
-## 3. Insurance Claims
+## 4. Insurance Claims
 
 **Use Case:** Adjuster reports and policy document editing. Claims adjusters write field reports, revise reserve memos, and edit settlement letters across multiple claims simultaneously. These documents go through internal review, supervisor approval, and carrier submission. SuperDocs provides session-based editing for collaborative report writing, AI-assisted drafting of standardized claim narratives, revision control for reserve adjustments, and controlled PDF export for carrier submissions.
 
@@ -30,7 +40,7 @@
 
 ---
 
-## 4. Healthcare Administration
+## 5. Healthcare Administration
 
 **Use Case:** Care plans and discharge summaries (synthetic data only for demo). Healthcare administrators draft interdisciplinary care plans, discharge summaries, and utilization review documents that involve multiple clinical contributors (physicians, nurses, case managers). These documents must be revision-controlled for CMS compliance, role-appropriate for different clinical staff, and exported as controlled PDFs for patient records. SuperDocs enables collaborative clinical document editing with full audit trails.
 
@@ -40,7 +50,7 @@
 
 ---
 
-## 5. Financial Services
+## 6. Financial Services
 
 **Use Case:** Loan files, KYC documents, and client letters. Banks process hundreds of pages per loan application (W-2s, tax returns, bank statements, title reports). KYC onboarding requires assembling identity documents, proof of address, and financial disclosures with full audit trails. Client letters need multi-party review before sending. SuperDocs provides session-based editing for loan committee memos, AI-assisted document assembly, revision control for credit approval documents, and controlled PDF export for regulatory submissions.
 
@@ -50,7 +60,7 @@
 
 ---
 
-## 6. Government / Regulatory Filings
+## 7. Government / Regulatory Filings
 
 **Use Case:** Document revision control for regulatory filings, policy manuals, and compliance documents. Government agencies produce regulations, guidance documents, and filing requirements that go through multiple revision rounds with legal review, public comment periods, and inter-agency coordination. SuperDocs provides session-based collaborative editing, full revision history with audit trails, AI-assisted plain-language rewriting, and controlled PDF export for Federal Register submissions.
 
@@ -60,23 +70,13 @@
 
 ---
 
-## 7. HR — Policies and Employee Handbooks
+## 8. HR — Policies and Employee Handbooks
 
 **Use Case:** Employee handbook creation, policy revision, and multi-state compliance updates. HR teams maintain handbooks that must be updated when employment laws change, reviewed by legal counsel, distributed to employees across multiple jurisdictions, and tracked for acknowledgment. SuperDocs enables HR teams to collaboratively edit policies, AI suggests language aligned with current regulations, revision history provides defensible records, and controlled PDF export distributes the current version only.
 
 **Buyer:** **Workday** — *Director, HR Policy & Employee Relations*. Workday's own HR organization manages policies for a global workforce. Externally, Workday serves as the HRIS platform for thousands of enterprises. An HR Policy Director at Workday (or a large Workday customer like a Fortune 500 company) needs to maintain handbooks across 50+ jurisdictions with version control and acknowledgment tracking.
 
 **Why SuperDocs fits:** Workday's HR teams need to update policies whenever labor laws change across multiple states. SuperDocs' AI can flag outdated language, session-based editing lets HR and legal counsel collaborate without email chains, revision history creates the defensible audit trail that BLR's Handbook Builder and similar tools provide, and controlled PDF export ensures employees only receive the current approved version.
-
----
-
-## 8. Education / Academic — Thesis and Dissertation Revision
-
-**Use Case:** Thesis and dissertation revision cycles between students and committee members. Graduate students submit drafts that receive feedback from multiple committee members, requiring iterative revisions with tracked changes. Universities require specific formatting (margins, page numbering, table of contents alignment) and final submission in PDF/A format. SuperDocs provides session-based editing between student and advisor, AI helps with academic style and formatting compliance, revision history tracks the evolution from draft to defense-ready document, and controlled export produces publication-ready PDF/A.
-
-**Buyer:** **MIT** — *Director of Graduate Education / Graduate Program Coordinator*. MIT's Office of Graduate Education oversees thesis submission for all doctoral and master's candidates. The thesis process involves proposal, defense, revision, and submission with strict formatting requirements. MIT requires PDF/A-1 format, DocuSign committee signatures, and specific archival specifications.
-
-**Why SuperDocs fits:** MIT's thesis process involves multiple revision rounds between student, committee, and the Manuscript Review Office. SuperDocs' revision tracking captures the full evolution of the thesis, AI assists with formatting compliance (checking margins, page numbering, table of contents alignment), session-based editing lets advisors annotate without separate track-changes documents, and controlled export produces PDF/A-1 compliant submissions.
 
 ---
 
@@ -97,3 +97,4 @@
 **Buyer:** **Publicis Media** — *SVP, Media Agency Operations*. Publicis Media's SVP of Operations leads the team handling day-to-day client operations and media support. This role is responsible for SOW management, including resource planning, developing account playbooks, and managing Authorization approval structures. The SVP develops and implements processes to ensure client success across the agency's multi-market operations.
 
 **Why SuperDocs fits:** Publicis Media's operations team manages SOWs and scope documents across global clients. SuperDocs' session-based editing lets account, strategy, and finance teams collaboratively author proposals, AI generates standard SOW sections (deliverables, acceptance criteria, change order processes), revision tracking prevents scope-creep disputes by documenting exactly what changed and when, and controlled PDF export ensures only client-approved versions are distributed.
+
