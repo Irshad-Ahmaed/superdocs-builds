@@ -65,7 +65,9 @@ pytest build-b/sidecar/tests -q
 
 ## Use cases
 
-See [use-cases.md](./use-cases.md) for 10 deeply researched real-world use cases across industries and enterprise buyers.
+See [use-cases.md](./use-cases.md) for 10 deeply researched real-world use cases across industries, startups, and enterprise buyers (including EdTech & student note-making with Anthroholic / AnswerWriting.com as #1).
+
+
 
 ## License
 
