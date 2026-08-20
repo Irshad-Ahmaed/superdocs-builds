@@ -177,8 +177,10 @@ class StudyGuideGenerator:
         )
         if res.status_code == 200:
             data = res.json()
-            return data.get("content", data.get("message", {}).get("content", req.current_markdown))
-        return req.current_markdown
+            new_content = data.get("content", data.get("message", {}).get("content"))
+            if new_content and new_content != req.current_markdown:
+                return new_content
+        raise ValueError(f"Cloud API failed to refine document. Status: {res.status_code}")
 
     def _generate_deterministic_guide(self, req: StudyGuideRequest) -> str:
         """Deterministic high-yield synthesis for offline tests and reliable fallbacks."""
@@ -283,9 +285,9 @@ class StudyGuideGenerator:
                 "---\n\n"
                 "## 3. Feynman Intuitive Explanation\n\n"
                 "Imagine managing an expanding business hierarchy:\n"
-                r"* If junior workers do all the heavy lifting, completion time depends strictly on the total number of junior workers ($n^{\log_b a}$).\n"
-                r"* If the executive at the top spends massive time coordinating ($f(n)$ is huge), the executive's time dominates ($f(n)$).\n"
-                r"* If every tier takes identical effort, you multiply one tier's cost by the height of the ladder ($\log n$).\n\n"
+                r"* If junior workers do all the heavy lifting, completion time depends strictly on the total number of junior workers ($n^{\log_b a}$)." + "\n"
+                r"* If the executive at the top spends massive time coordinating ($f(n)$ is huge), the executive's time dominates ($f(n)$)." + "\n"
+                r"* If every tier takes identical effort, you multiply one tier's cost by the height of the ladder ($\log n$)." + "\n\n"
                 "---\n\n"
                 "## 4. Active Recall & Practice Quiz\n\n"
                 r"### 📝 Question 1: Recurrence Complexity Analysis" + "\n"
