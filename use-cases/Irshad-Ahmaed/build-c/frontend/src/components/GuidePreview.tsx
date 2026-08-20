@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
+import katex from 'katex';
 
 interface GuidePreviewProps {
   guideMarkdown: string;
@@ -7,12 +8,6 @@ interface GuidePreviewProps {
   isExporting: boolean;
   pdfDataUrl: string | null;
   pageCount: number;
-}
-
-declare global {
-  interface Window {
-    renderMathInElement?: (el: HTMLElement, options?: any) => void;
-  }
 }
 
 export const GuidePreview: React.FC<GuidePreviewProps> = ({
@@ -25,32 +20,6 @@ export const GuidePreview: React.FC<GuidePreviewProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'preview' | 'markdown'>('preview');
   const [copySuccess, setCopySuccess] = useState(false);
-  const mathRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const renderMath = () => {
-      if (mathRef.current && window.renderMathInElement) {
-        try {
-          window.renderMathInElement(mathRef.current, {
-            delimiters: [
-              { left: '$$', right: '$$', display: true },
-              { left: '$', right: '$', display: false },
-              { left: '\\(', right: '\\)', display: false },
-              { left: '\\[', right: '\\]', display: true },
-            ],
-            throwOnError: false,
-          });
-        } catch (e) {
-          console.warn('KaTeX rendering error:', e);
-        }
-      }
-    };
-
-    renderMath();
-    // Retry once after 200ms in case KaTeX CDN script is still resolving
-    const timer = setTimeout(renderMath, 200);
-    return () => clearTimeout(timer);
-  }, [guideMarkdown, activeTab]);
 
   const handleCopyMarkdown = () => {
     navigator.clipboard.writeText(guideMarkdown);
@@ -62,25 +31,44 @@ export const GuidePreview: React.FC<GuidePreviewProps> = ({
     if (!md) return '<p style="color: var(--text-muted); font-style: italic;">No study guide generated yet. Select an academic preset or paste notes on the left to begin.</p>';
     
     let html = md;
-    // Headings
+
+    // 1. Render display math $$ ... $$
+    html = html.replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, (_, math) => {
+      try {
+        return `<div class="katex-display-box">${katex.renderToString(math.trim(), { displayMode: true, throwOnError: false })}</div>`;
+      } catch (e) {
+        return `$$${math}$$`;
+      }
+    });
+
+    // 2. Render inline math $ ... $
+    html = html.replace(/\$([^\$\n]+?)\$/g, (_, math) => {
+      try {
+        return katex.renderToString(math.trim(), { displayMode: false, throwOnError: false });
+      } catch (e) {
+        return `$${math}$`;
+      }
+    });
+
+    // 3. Headings
     html = html.replace(/^# (.*$)/gim, '<h1 style="font-size: 18px; font-weight: 700; color: #fff; border-bottom: 2px solid var(--emerald-solid); padding-bottom: 6px; margin-bottom: 14px;">$1</h1>');
     html = html.replace(/^## (.*$)/gim, '<h2 style="font-size: 14px; font-weight: 600; color: var(--emerald-text); border-bottom: 1px solid var(--border-subtle); padding-bottom: 4px; margin-top: 18px; margin-bottom: 10px;">$1</h2>');
     html = html.replace(/^### (.*$)/gim, '<h3 style="font-size: 13px; font-weight: 500; color: var(--cyan-text); margin-top: 12px; margin-bottom: 6px;">$1</h3>');
     
-    // Horizontal rules
+    // 4. Horizontal rules
     html = html.replace(/^---$/gim, '<hr style="border: 0; border-top: 1px solid var(--border-subtle); margin: 16px 0;" />');
     
-    // Blockquotes
+    // 5. Blockquotes
     html = html.replace(/^> (.*$)/gim, '<blockquote style="background: var(--emerald-bg); border-left: 3px solid var(--emerald-solid); padding: 8px 12px; border-radius: 0 6px 6px 0; color: var(--emerald-text); font-size: 12px; margin: 10px 0;">$1</blockquote>');
     
-    // Bold & Italics
+    // 6. Bold & Italics
     html = html.replace(/\*\*(.*?)\*\*/gim, '<strong style="color: #fff; font-weight: 600;">$1</strong>');
     html = html.replace(/\*(.*?)\*/gim, '<em style="color: var(--text-secondary);">$1</em>');
     
-    // List items
+    // 7. List items
     html = html.replace(/^[*-] (.*$)/gim, '<li style="margin-left: 18px; margin-bottom: 4px; color: var(--text-secondary);">$1</li>');
     
-    // Render Markdown tables nicely
+    // 8. Render Markdown tables nicely
     const lines = html.split('\n');
     let inTable = false;
     let tableHtml = '';
@@ -216,7 +204,6 @@ export const GuidePreview: React.FC<GuidePreviewProps> = ({
       }}>
         {activeTab === 'preview' ? (
           <div
-            ref={mathRef}
             dangerouslySetInnerHTML={{ __html: formatMarkdownToHtml(guideMarkdown) }}
           />
         ) : (
