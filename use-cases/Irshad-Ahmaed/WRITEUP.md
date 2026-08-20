@@ -64,11 +64,15 @@ flowchart TB
    * *Decision:* Decoupled each build into dedicated `APIRouter` modules (`build_a/router.py`, `build_b/router.py`, `build_c/router.py`) orchestrated by a lightweight ~70-line `server.py`.
    * *Trade-off:* Adds a router file per build, but ensures 100% route isolation, zero name collisions, and independent testability.
 
-2. **LLM Math Delimiter Normalization (`\(` $\rightarrow$ `$`, `\[` $\rightarrow$ `$$`)**:
-   * *Decision:* In Build C, implemented regex pre-processing to normalize all unpredictable LLM equation formats into standard Markdown delimiters before sending to the frontend.
-   * *Trade-off:* Microsecond server-side pass, but completely prevents KaTeX frontend parse errors and layout crashes.
+2. **Vector Layout Engine (`insert_htmlbox`) for True Unicode Math**:
+   * *Decision:* Upgraded Build C's PDF exporter to use PyMuPDF's `insert_htmlbox` engine instead of standard text insertion or relying on the cloud API fallback.
+   * *Trade-off:* Requires mapping system fonts, but absolutely guarantees that complex Greek math characters (∇, ρ, ε, ∂) render flawlessly as vector text alongside robust bounding boxes for Markdown tables, without missing glyph errors (`?`).
 
-3. **Atomic PDF Stamping & Margin Redaction Guarantee**:
+3. **Deterministic Fallbacks & Silent Failure Prevention**:
+   * *Decision:* Implemented strict response validation on the `api.superdocs.app/v1/chat` refinement endpoint.
+   * *Trade-off:* Adds response overhead, but gracefully catches invalid keys/timeouts and instantly triggers the local deterministic patching engine, ensuring the user's UI always reliably updates.
+
+4. **Atomic PDF Stamping & Margin Redaction Guarantee**:
    * *Decision:* Layered SuperDocs Cloud PDF export with PyMuPDF dynamic footer centering and bottom-margin artifact redaction.
    * *Trade-off:* Incorporates a secondary PyMuPDF processing pass, but guarantees that physical page numbers (`Page 1 of 2`) are mathematically centered on every page margin and stray prompt artifacts (`Page of`) are eliminated.
 
