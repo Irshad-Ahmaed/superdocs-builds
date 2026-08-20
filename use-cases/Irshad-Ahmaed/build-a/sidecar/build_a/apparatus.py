@@ -86,8 +86,7 @@ def _build_highlights_instruction(metadata: RevisionMetadata) -> str:
     )
     return (
         f"Add a 'Highlights of Change' heading and summary paragraph after the List of Effective Pages table: "
-        f"'Highlights of Change (Revision {metadata.revision_number}, {metadata.date}): {summary}', "
-        f"followed by a page break before the manual body."
+        f"'Highlights of Change (Revision {metadata.revision_number}, {metadata.date}): {summary}'."
     )
 
 

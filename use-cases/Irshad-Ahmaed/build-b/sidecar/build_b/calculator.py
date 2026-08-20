@@ -275,10 +275,10 @@ class ReportGenerator:
         session_id: str,
         results: CalculatorResults,
     ) -> str:
-        """Send the report prompt to SuperDocs with pre-structured HTML template (1 op).
+        """Send the pre-structured HTML report template to SuperDocs (fast export).
 
-        Pre-seeding the template allows SuperDocs to process the document in ~3s
-        instead of generating HTML from scratch over 18s.
+        Pre-seeding the template allows SuperDocs to process the document in ~1-2s
+        instead of running a heavy 25s LLM generation cycle from scratch.
         """
         prompt = self.build_report_prompt(results)
         template_html = self.build_report_template(results)

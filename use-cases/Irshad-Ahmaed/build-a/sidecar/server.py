@@ -9,7 +9,13 @@ from __future__ import annotations
 
 import base64
 import logging
+import sys
 from pathlib import Path
+
+# Always ensure build-b sidecar is in sys.path regardless of where uvicorn is launched
+_build_b_sidecar = Path(__file__).resolve().parent.parent.parent / "build-b" / "sidecar"
+if _build_b_sidecar.exists() and str(_build_b_sidecar) not in sys.path:
+    sys.path.insert(0, str(_build_b_sidecar))
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -250,16 +256,23 @@ async def step_apparatus(req: ApparatusRequest) -> ApparatusResponse:
                     or (edit_resp.response and "header" in edit_resp.response.lower())
                 )
                 import re
-                verified_footer = bool(
-                    re.search(r'page\s+(\d+|x)\s+of\s+(\d+|y)', check_text, re.IGNORECASE)
-                    or "page" in check_text
-                    or (edit_resp.response and "footer" in edit_resp.response.lower())
-                )
+                page_match = re.search(r'(page\s+\d+\s+of\s+\d+)', post_html, re.IGNORECASE)
+                if page_match:
+                    dynamic_footer = page_match.group(1).title()
+                    verified_footer = True
+                else:
+                    verified_footer = bool(
+                        re.search(r'page\s+(\d+|x)\s+of\s+(\d+|y)', check_text, re.IGNORECASE)
+                        or "page" in check_text
+                        or (edit_resp.response and "footer" in edit_resp.response.lower())
+                    )
+                    resp_page_match = re.search(r'(page\s+\d+\s+of\s+\d+)', edit_resp.response or "", re.IGNORECASE)
+                    dynamic_footer = resp_page_match.group(1).title() if resp_page_match else "Page 1 of 1"
 
                 stamp_result = StampResponse(
                     session_id=req.session_id,
                     header_text=f"Revision {req.revision_number} — {req.date}",
-                    footer_text="Page X of Y",
+                    footer_text=dynamic_footer,
                     ops_used=0,
                     verified_header=verified_header,
                     verified_footer=verified_footer,
@@ -366,20 +379,25 @@ async def stamp_headers(req: StampRequest) -> StampResponse:
             # Verify: fetch document and check if header/footer were applied
             verified_header = False
             verified_footer = False
+            footer_text = result.footer_text
             try:
                 history = await client.get_session_history(req.session_id)
                 if history.document_html:
                     html_lower = history.document_html.lower()
                     verified_header = f"revision {req.revision_number}".lower() in html_lower
-                    # Footer: check for "page" + digit pattern (e.g., "Page 1 of 5")
                     import re
-                    verified_footer = bool(re.search(r'page\s+\d+\s+of\s+\d+', html_lower))
+                    page_match = re.search(r'(page\s+\d+\s+of\s+\d+)', history.document_html, re.IGNORECASE)
+                    if page_match:
+                        footer_text = page_match.group(1).title()
+                        verified_footer = True
+                    else:
+                        verified_footer = bool(re.search(r'page\s+\d+\s+of\s+\d+', html_lower))
             except SuperDocsError:
                 pass  # verification is best-effort
 
             return StampResponse(
                 header_text=result.header_text,
-                footer_text=result.footer_text,
+                footer_text=footer_text,
                 ops_used=result.ops_used,
                 verified_header=verified_header,
                 verified_footer=verified_footer,
