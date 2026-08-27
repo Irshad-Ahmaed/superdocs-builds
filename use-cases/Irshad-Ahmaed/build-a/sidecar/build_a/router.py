@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import base64
 import logging
+import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import httpx
+import pymupdf as fitz
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -114,34 +118,51 @@ def _apply_dynamic_targeted_edit(html: str, inst: str) -> str:
 
 @router.post("/step/load-edit")
 async def step_load_edit(req: LoadEditRequest) -> Dict[str, Any]:
-    """Step 1: Load document and dynamically apply targeted revision edit."""
+    """Step 1: Load document and apply revision edit via SuperDocs Cloud AI (with local fallback)."""
     import os
-
-    post_html = req.document_html
+    import re
+    import httpx
 
     # Check for live SuperDocs cloud API first if key available
     api_key = os.environ.get("SUPERDOCS_API_KEY")
     if api_key:
         try:
-            async with SuperDocsClient(api_key=api_key) as client:
-                session = await client.start_session(name=f"rev_{req.session_id}", document=req.document_html)
-                sess_id = session.get("id") or session.get("session_id")
-                if sess_id:
-                    await client.send_chat(session_id=sess_id, content=req.edit_instructions)
-                    cloud_doc = await client.get_document(sess_id)
-                    if cloud_doc and cloud_doc != req.document_html:
+            async with httpx.AsyncClient(
+                base_url="https://api.superdocs.app",
+                headers={"Authorization": f"Bearer {api_key}"},
+                verify=False,
+                timeout=45.0,
+            ) as client:
+                res = await client.post("/v1/chat", json={
+                    "session_id": req.session_id,
+                    "document_html": req.document_html,
+                    "message": req.edit_instructions,
+                })
+                if res.status_code == 200:
+                    data = res.json()
+                    doc_changes = data.get("document_changes", {})
+                    pending = doc_changes.get("pending_changes", [])
+                    ai_msg = data.get("response", "Applied via SuperDocs Cloud AI")
+                    if pending:
+                        cloud_html = req.document_html
+                        for p in pending:
+                            old_h = p.get("old_html", "")
+                            new_h = p.get("new_html", "")
+                            clean_old = re.sub(r'\s*data-chunk-id="[^"]+"', '', old_h)
+                            clean_new = re.sub(r'\s*data-chunk-id="[^"]+"', '', new_h)
+                            cloud_html = cloud_html.replace(old_h, clean_new).replace(clean_old, clean_new)
                         return {
                             "success": True,
                             "ops_used": 1,
                             "pre_edit_html": req.document_html,
-                            "post_edit_html": cloud_doc,
-                            "response_text": f"Applied via SuperDocs AI: {req.edit_instructions[:80]}...",
+                            "post_edit_html": cloud_html,
+                            "response_text": f"SuperDocs Cloud AI: {ai_msg}",
                             "errors": [],
                         }
         except Exception as e:
             logger.warning("Cloud SuperDocs call fallback to local targeted engine: %s", e)
 
-    # Dynamic local AST targeted editor
+    # Dynamic local AST targeted editor fallback
     post_html = _apply_dynamic_targeted_edit(req.document_html, req.edit_instructions)
 
     return {
@@ -357,31 +378,45 @@ async def export_pdf(req: ExportRequest) -> Dict[str, Any]:
     pdf_path = (reports_dir / f"FCOM-Rev-{rev_num}.pdf") if not req.output_path else Path(req.output_path)
     pdf_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # 1. Try SuperDocs Cloud API if active API key present
+    # 1. Export directly via SuperDocs Cloud API if active API key present
     api_key = os.environ.get("SUPERDOCS_API_KEY")
     if api_key:
         try:
-            async with SuperDocsClient(api_key=api_key) as client:
-                exporter = ControlledExporter(client)
-                res = await exporter.export_controlled_pdf(
-                    session_id=req.session_id,
-                    revision_number=rev_num,
-                    manual_type=req.manual_type,
-                    operator_code=req.operator_code,
-                    document_html=req.document_html,
-                )
-                if res and res.pdf_path and res.pdf_path.exists():
-                    pdf_bytes = res.pdf_path.read_bytes()
+            async with httpx.AsyncClient(
+                base_url="https://api.superdocs.app",
+                headers={"Authorization": f"Bearer {api_key}"},
+                verify=False,
+                timeout=60.0,
+            ) as client:
+                payload = {"format": "pdf"}
+                if req.document_html:
+                    payload["html"] = req.document_html
+                elif req.session_id:
+                    payload["session_id"] = req.session_id
+
+                cloud_res = await client.post("/v1/documents/export", json=payload)
+                if cloud_res.status_code == 200 and cloud_res.content.startswith(b"%PDF"):
+                    pdf_path.write_bytes(cloud_res.content)
+                    # Apply bottom-centered dynamic page numbers and header check
+                    try:
+                        stamper_client = SuperDocsClient(api_key=api_key)
+                        exporter = ControlledExporter(stamper_client)
+                        exporter._ensure_pdf_page_numbers(pdf_path)
+                    except Exception:
+                        pass
+
+                    pdf_bytes = pdf_path.read_bytes()
                     pdf_b64 = base64.b64encode(pdf_bytes).decode()
+                    download_url = f"http://localhost:8000/api/download/{pdf_path.name}"
                     return {
                         "success": True,
-                        "pdf_path": str(res.pdf_path),
-                        "download_url": res.download_url or f"data:application/pdf;base64,{pdf_b64}",
+                        "pdf_path": str(pdf_path),
+                        "download_url": download_url,
                         "pdf_base64": pdf_b64,
                         "pdf_data_url": f"data:application/pdf;base64,{pdf_b64}",
                     }
         except Exception as e:
-            logger.warning("Cloud PDF export fallback to local PyMuPDF: %s", e)
+            logger.warning("Cloud SuperDocs PDF export fallback to local PyMuPDF: %s", e)
 
     # 2. Resilient Local PyMuPDF Vector Exporter
     doc = fitz.open()

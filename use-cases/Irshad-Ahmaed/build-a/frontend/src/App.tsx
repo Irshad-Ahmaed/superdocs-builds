@@ -214,6 +214,8 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: currentSessionId,
+          revision_number: revisionNumber,
+          document_html: postEditHtml || SAMPLE_HTML,
           output_path: `reports/FCOM-Rev-${revisionNumber}.pdf`,
         }),
       })
