@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import math
 import os
 import re
 import uuid
@@ -135,22 +136,29 @@ def clean_math_text(text: str) -> str:
     s = re.sub(r'\^\{([^{}]+)\}', r'^\1', s)
     # Strip remaining stray braces and backslashes
     s = s.replace("{", "").replace("}", "").replace("\\", "")
-    
-    # Escape HTML tags so they don't break insert_htmlbox
-    s = s.replace("<", "&lt;").replace(">", "&gt;")
     return s.strip()
 
 
 def strip_markdown(text: str) -> str:
-    """Strip formatting characters while preserving clean text."""
+    """Strip formatting characters while preserving clean HTML tags and math."""
+    if not text:
+        return ""
     s = text.strip()
     s = re.sub(r'^\>\s*', '', s)
     s = re.sub(r'^[*-]\s*', '', s)
-    s = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', s) # Keep bold for HTML
-    s = re.sub(r'\*(.*?)\*', r'<i>\1</i>', s) # Keep italic for HTML
+    
+    # Process LaTeX math
+    s = clean_math_text(s)
+
+    # Format bold & italic cleanly for HTML
+    s = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', s)
+    s = re.sub(r'(?<!\*)\*([^*]+)\*(?!\*)', r'<i>\1</i>', s)
     s = re.sub(r'\`\`\`.*', '', s)
     s = re.sub(r'\`(.*?)\`', r'<b>\1</b>', s)
-    return clean_math_text(s)
+    
+    # Remove any stray unparsed markdown asterisks
+    s = s.replace("**", "").replace("*", "")
+    return s.strip()
 
 
 def _draw_html_text(page, rect, text, font_sz, color) -> float:
@@ -311,20 +319,10 @@ class StudyGuideExporter:
                     for r_idx, row in enumerate(table_rows):
                         is_header = (r_idx == 0)
                         
-                        # First pass: find max cell height to set row height
-                        max_used_h = 16
-                        for c_idx, cell_text in enumerate(row):
-                            cw = col_widths[c_idx] if c_idx < len(col_widths) else (content_width / num_cols)
-                            # Create a dummy page measurement rect
-                            meas_rect = fitz.Rect(0, 0, cw - 8, 500)
-                            font_sz = 8.0 if is_header else 7.5
-                            html_test = f"<div style='font-family: sans-serif; font-size: {font_sz}pt; line-height: 1.3;'>{cell_text}</div>"
-                            rc = page.insert_htmlbox(meas_rect, html_test)
-                            used = meas_rect.height - rc[0] if rc[0] >= 0 else 16
-                            if used > max_used_h:
-                                max_used_h = used
-                                
-                        row_h = max_used_h + 8
+                        # Estimate row height cleanly from text lengths
+                        max_char_len = max(len(re.sub(r'<[^>]+>', '', c)) for c in row) if row else 10
+                        lines_est = max(1, math.ceil(max_char_len / 20))
+                        row_h = max(18, lines_est * 12 + 6)
 
                         if y + row_h > max_y:
                             page, y = create_page()
@@ -343,8 +341,8 @@ class StudyGuideExporter:
                             
                             cell_rect = fitz.Rect(cx + 4, y + 4, cx + cw - 4, y + row_h - 2)
                             text_color = (0.08, 0.12, 0.2) if is_header else (0.15, 0.2, 0.28)
-                            font_sz = 8.0 if is_header else 7.5
-                            if is_header:
+                            font_sz = 7.8 if is_header else 7.2
+                            if is_header and not cell_text.startswith("<b>"):
                                 cell_text = f"<b>{cell_text}</b>"
                             _draw_html_text(page, cell_rect, cell_text, font_sz, text_color)
                             cx += cw
@@ -379,43 +377,38 @@ class StudyGuideExporter:
             clean_p = strip_markdown(line)
             if clean_p:
                 rect = fitz.Rect(left_x, y, right_x, y + 150)
-                used_h = _draw_html_text(page, rect, clean_p, 9.0, (0.15, 0.2, 0.25))
+                used_h = _draw_html_text(page, rect, clean_p, 8.8, (0.15, 0.2, 0.25))
                 y += used_h + 5
             i += 1
 
-        doc.save(str(target_path))
-        doc.close()
-
-    def _stamp_headers_and_footers(self, pdf_path: Path, subject: str, topic: str) -> int:
-        """Inject top header and mathematically centered Page X of Y footers."""
-        if not fitz:
-            return 1
-
-        tmp_path = pdf_path.with_suffix(".tmp.pdf")
-        doc = fitz.open(str(pdf_path))
+        # Stamp top header and centered footers on every page directly
         total_pages = len(doc)
         header_text = f"STUDY GUIDE: {subject.upper()} - REVISION SERIES"
 
-        for idx, page in enumerate(doc):
+        for idx, p in enumerate(doc):
             p_num = idx + 1
             footer_text = f"Page {p_num} of {total_pages}"
             
-            rect_bottom = fitz.Rect(0, page.rect.height - 45, page.rect.width, page.rect.height)
-            page.add_redact_annot(rect_bottom)
-            page.apply_redactions()
-
-            page.draw_line(fitz.Point(40, 42), fitz.Point(page.rect.width - 40, 42), color=(0.85, 0.9, 0.95), width=0.8)
-            page.insert_text((40, 35), header_text, fontsize=7.5, color=(0.4, 0.45, 0.5))
+            p.draw_line(fitz.Point(40, 42), fitz.Point(p.rect.width - 40, 42), color=(0.85, 0.9, 0.95), width=0.8)
+            p.insert_text((40, 35), header_text, fontsize=7.5, color=(0.4, 0.45, 0.5))
             
             text_width = fitz.get_text_length(footer_text, fontsize=8.5)
-            x_center = (page.rect.width - text_width) / 2
-            y_pos = page.rect.height - 22
-            page.insert_text((x_center, y_pos), footer_text, fontsize=8.5, color=(0.35, 0.4, 0.45))
+            x_center = (p.rect.width - text_width) / 2
+            y_pos = p.rect.height - 22
+            p.insert_text((x_center, y_pos), footer_text, fontsize=8.5, color=(0.35, 0.4, 0.45))
 
-        doc.save(str(tmp_path))
+        doc.save(str(target_path))
         doc.close()
-
-        if tmp_path.exists():
-            os.replace(str(tmp_path), str(pdf_path))
-
         return total_pages
+
+    def _stamp_headers_and_footers(self, pdf_path: Path, subject: str, topic: str) -> int:
+        """Helper to check page count."""
+        if not fitz:
+            return 1
+        try:
+            doc = fitz.open(str(pdf_path))
+            cnt = len(doc)
+            doc.close()
+            return cnt
+        except Exception:
+            return 1

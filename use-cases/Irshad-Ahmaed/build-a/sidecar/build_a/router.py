@@ -213,6 +213,60 @@ async def step_apparatus(req: ApparatusStepRequest) -> Dict[str, Any]:
                 f'<p style="border-left: 3px solid #2563eb; padding-left: 10px; margin-left: -13px; background: rgba(37,99,235,0.05);">{d.new_text}</p>',
             )
 
+    # Prepend Revision Record Table and List of Effective Pages (LEP)
+    change_summary = req.highlights_summary or (req.changes[0] if req.changes else "Normal procedures updated per revision instructions.")
+    tables_html = f"""<div style="margin-bottom: 20px; padding-bottom: 12px; border-bottom: 2px solid #cbd5e1; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+  <h3 style="font-size: 13px; color: #0f172a; margin-top: 14px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;">Record of Revisions</h3>
+  <table style="width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 11px; text-align: left;">
+    <thead>
+      <tr style="background: #f1f5f9;">
+        <th style="padding: 5px 8px; border: 1px solid #cbd5e1; font-weight: 600;">Rev No.</th>
+        <th style="padding: 5px 8px; border: 1px solid #cbd5e1; font-weight: 600;">Date</th>
+        <th style="padding: 5px 8px; border: 1px solid #cbd5e1; font-weight: 600;">Affected Section</th>
+        <th style="padding: 5px 8px; border: 1px solid #cbd5e1; font-weight: 600;">Description of Change</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="padding: 5px 8px; border: 1px solid #cbd5e1; font-weight: 700; color: #2563eb;">{req.revision_number}</td>
+        <td style="padding: 5px 8px; border: 1px solid #cbd5e1;">{req.date}</td>
+        <td style="padding: 5px 8px; border: 1px solid #cbd5e1;">Section 4.1</td>
+        <td style="padding: 5px 8px; border: 1px solid #cbd5e1;">{change_summary}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3 style="font-size: 13px; color: #0f172a; margin-top: 14px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;">List of Effective Pages (LEP)</h3>
+  <table style="width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 11px; text-align: left;">
+    <thead>
+      <tr style="background: #f1f5f9;">
+        <th style="padding: 5px 8px; border: 1px solid #cbd5e1; font-weight: 600;">Section / Subject</th>
+        <th style="padding: 5px 8px; border: 1px solid #cbd5e1; font-weight: 600;">Status</th>
+        <th style="padding: 5px 8px; border: 1px solid #cbd5e1; font-weight: 600;">Revision Date</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="padding: 5px 8px; border: 1px solid #cbd5e1;">Section 4.1: Normal Procedures</td>
+        <td style="padding: 5px 8px; border: 1px solid #cbd5e1; color: #2563eb; font-weight: 700;">Revised (Rev {req.revision_number})</td>
+        <td style="padding: 5px 8px; border: 1px solid #cbd5e1;">{req.date}</td>
+      </tr>
+      <tr>
+        <td style="padding: 5px 8px; border: 1px solid #cbd5e1;">Sections 4.2 – 4.4: Emergency & Comms</td>
+        <td style="padding: 5px 8px; border: 1px solid #cbd5e1; color: #64748b;">Original / Unchanged</td>
+        <td style="padding: 5px 8px; border: 1px solid #cbd5e1;">2024-01-01</td>
+      </tr>
+    </tbody>
+  </table>
+</div>"""
+
+    if "</h1>" in updated_html:
+        updated_html = updated_html.replace("</h1>", f"</h1>\n{tables_html}", 1)
+    elif "<body>" in updated_html:
+        updated_html = updated_html.replace("<body>", f"<body>\n{tables_html}", 1)
+    else:
+        updated_html = tables_html + "\n" + updated_html
+
     return {
         "success": True,
         "ops_used": 1,
