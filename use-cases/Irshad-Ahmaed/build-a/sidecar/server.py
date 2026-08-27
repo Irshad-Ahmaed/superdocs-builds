@@ -31,6 +31,9 @@ from build_a.router import router as build_a_router
 from build_b.router import router as build_b_router
 from build_c.router import router as build_c_router
 
+_root_env = _base_dir / ".env"
+if _root_env.exists():
+    load_dotenv(dotenv_path=_root_env)
 load_dotenv()
 logger = logging.getLogger(__name__)
 

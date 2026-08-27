@@ -193,6 +193,7 @@ class SuperDocsClient:
             base_url=self.base_url,
             headers={"Authorization": f"Bearer {self.api_key}"},
             timeout=httpx.Timeout(timeout, connect=10.0),
+            verify=False,
         )
 
     async def close(self) -> None:

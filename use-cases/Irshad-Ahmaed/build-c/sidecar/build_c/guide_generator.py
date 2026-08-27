@@ -150,7 +150,7 @@ class StudyGuideGenerator:
             ],
             "temperature": 0.2,
         }
-        res = requests.post("https://api.superdocs.app/v1/chat", json=payload, headers=headers, timeout=25)
+        res = requests.post("https://api.superdocs.app/v1/chat", json=payload, headers=headers, timeout=35, verify=False)
         if res.status_code == 200:
             data = res.json()
             return data.get("content", data.get("message", {}).get("content", ""))
@@ -173,7 +173,8 @@ class StudyGuideGenerator:
             "https://api.superdocs.app/v1/chat",
             json={"messages": [{"role": "user", "content": prompt}], "temperature": 0.2},
             headers=headers,
-            timeout=20,
+            timeout=35,
+            verify=False,
         )
         if res.status_code == 200:
             data = res.json()
