@@ -1,88 +1,102 @@
-# SuperDocs Full-Stack AI Engineer Assessment — Technical Writeup
+# SuperDocs Full-Stack AI Engineer Assessment — Task 4 Write-Up
 
-**Candidate:** Irshad Ahmad  
-**Repository:** [github.com/Irshad-Ahmaed/doctask-irshad-ahmad](https://github.com/Irshad-Ahmaed/doctask-irshad-ahmad)  
-**Public Builds:** `use-cases/Irshad-Ahmaed/build-a`, `build-b`, & `build-c` (Open Task List)  
-
----
-
-## 1. What Was Built & Who It Serves
-
-### Task 1: DocTask — The Analyst That Never Sleeps
-An agentic document intelligence system that manages a growing corpus of unstructured documents (Project Helios: project plans, meeting minutes, status reports, budgets in PDF/DOCX/XLSX/MD).
-- **Core Workflow:** Ingest $\rightarrow$ Extract Facts $\rightarrow$ Detect Cross-Document Conflicts $\rightarrow$ Examine Governance Rules $\rightarrow$ Human Gate $\rightarrow$ Incremental Deliverable Ledger.
-- **Key Invariant:** Every assertion traces to verifiable source chunks with SHA-256 content hashes. Updates are focused merges, not expensive full rewrites; untouched sections remain byte-identical.
-
-### Task 2 Build A: Aviation Revision Bars & Effective Pages Generator
-Serves **Technical Publications Specialists** in commercial aviation managing Flight Crew Operating Manuals (FCOMs) and Aircraft Maintenance Manuals (AMMs).
-- **Functionality:** Compares raw document revisions, generates left-margin change bars (`3px solid #2563eb`), builds a **Revision Record** table, compiles a **List of Effective Pages (LEP)**, generates a **Highlights of Change** summary, dynamically stamps running headers/footers (`Revision 0043 — 2025-01-15` & `Page X of Y`), and exports controlled, verified PDFs.
-
-### Task 2 Build B: FinOps Build-vs-Buy / ROI Calculator
-Serves **Technology Leadership & Procurement Executives** evaluating custom AI document pipelines vs. SuperDocs.
-- **Functionality:** Live, reactive Total Cost of Ownership (TCO) calculator comparing CapEx, maintenance, and infrastructure against SuperDocs tiers (Free, Plus, Pro). Compiles and exports an executive branded PDF report via the SuperDocs Cloud API with exact matching figures and $0 CapEx analysis.
-
-### Task 2 Build C: Study-Guide & Equation-Bearing Revision Synthesizer (Open Task List Band S2)
-Serves **EdTech Tutors, University STEM Students, and Civil Services Aspirants** (e.g. *Anthroholic / AnswerWriting.com*).
-- **Functionality:** Ingests raw, unorganized lecture notes and shorthand formulas (e.g. Maxwell's equations, Black-Scholes, Master Theorem) and synthesizes a structured 4-tier pedagogical guide (Formula & Definition Matrix, Cornell Conceptual Breakdown, Feynman Intuitive Explanations, and Active Recall Practice Quiz). Exports publication-grade vector PDFs with KaTeX math rendering, running headers, and centered page footers.
+**Candidate:** Irshad Ahmad
+**GitHub:** [Irshad-Ahmaed](https://github.com/Irshad-Ahmaed)
+**Task 1 Repo:** [github.com/Irshad-Ahmaed/doctask-irshad-ahmad](https://github.com/Irshad-Ahmaed/doctask-irshad-ahmad)
+**Task 2 PR:** [github.com/superdocsapp/superdocs-builds/pull/104](https://github.com/superdocsapp/superdocs-builds/pull/104)
 
 ---
 
-## 2. Technical Architecture & Engineering Decisions
+## What Was Built, For Whom, and Why
 
-```mermaid
-flowchart TB
-    subgraph ClientLayer ["Client & Interface Surface"]
-        WebA["Build A: Aviation FCOM UI (Port 5173)"]
-        WebB["Build B: FinOps ROI UI (Port 5174)"]
-        WebC["Build C: Study Guide UI (Port 5175)"]
-        DocTaskUI["DocTask Review UI (Port 3000)"]
-    end
+### Task 1 — DocTask: The Analyst That Never Sleeps
 
-    subgraph CoreEngine ["Modular Sidecar Hub (Port 8000)"]
-        RouterA["build_a/router.py (/api/step/*, /api/export)"]
-        RouterB["build_b/router.py (/api/export-report)"]
-        RouterC["build_c/router.py (/api/study-guide/*)"]
-    end
+**The problem:** A growing team managing Project Helios (a fictitious but realistic large-scale project) produces a stream of unstructured documents — plans, meeting minutes, status reports, budgets — in PDF, DOCX, XLSX, and Markdown formats. No human can read all of them and simultaneously track whether the latest budget contradicts an earlier plan, or whether a status report quietly breaks a previously approved governance rule. The mistakes surface weeks later, after decisions have already been made on bad data.
 
-    subgraph DocumentLayer ["Document Processing & Stamping"]
-        MathNorm["LaTeX Delimiter Normalizer ($$, $)"]
-        DocDiffer["Paragraph AST Differ & Redline Engine"]
-        Apparatus["LEP & Revision Record Generator"]
-        PyMuPDF["PyMuPDF Centered Stamping & Redaction Engine"]
-        SuperDocsAPI["SuperDocs Cloud API (Chat / Export / Parts)"]
-    end
+**What I built:** An agentic background worker that continuously watches a document inbox. When a new file arrives, it automatically ingests the document, extracts structured facts using an LLM, performs semantic similarity search against all previously ingested documents to detect factual conflicts (e.g., "Budget revised from \$2.1M to \$2.6M — contradicts approved ceiling in Project Charter"), checks all extracted facts against a YAML governance rules file, and then stops. It does not act. It queues every conflict and finding for a human to approve or reject in a React review interface before anything is written to the permanent append-only ledger.
 
-    ClientLayer --> CoreEngine
-    CoreEngine --> DocumentLayer
+**Measurable results:**
+- **116 / 116 automated tests pass** at 100% in 34.35 seconds with zero live API keys or paid credits required.
+- Every single AI assertion traces back to a SHA-256 hash of the source document chunk. Zero hallucinated citations are possible by construction.
+- The system handles second and third runs correctly: stages checkpoint by `(run_id, stage, input_hash)` so a crash mid-pipeline resumes exactly where it stopped without reprocessing.
+- Supported formats declared and tested: PDF, DOCX, XLSX, Markdown.
+
+**Why these trade-offs are the right ones:**
+The biggest architectural decision was to never let the AI write to the database autonomously. Every AI output is queued, inspected by a human, and only then committed. This costs speed but eliminates the entire class of "the AI confidently updated the wrong thing" failures that make enterprise customers distrust AI systems. The ledger is append-only by database privilege: the app role has INSERT but no UPDATE or DELETE on the `committed_changes` table. The history is physically immutable.
+
+I used PostgreSQL with pgvector for both relational storage and vector embeddings instead of adding a separate Pinecone or Weaviate instance. This keeps the system deployable on a single managed Postgres instance (AWS RDS, Supabase, etc.) and guarantees that vector searches and relational queries are transactionally consistent. The added complexity is a single extension install.
+
+**Honest limitations:**
+- The LangGraph `PostgresSaver` checkpointer tables are created by migration but the `RunExecutor` currently uses `InMemorySaver`. Mid-run checkpointing survives process kills at the gate-store level, but true mid-node resumption is not yet wired end-to-end.
+- Conflict detection uses cosine similarity thresholds tuned for English-language project documents. Non-English documents or highly technical domain language (e.g., legal Latin) may produce missed or false-positive conflicts.
+- The MCP server is implemented and tested but the SuperDocs MCP surface was not available for live integration testing during the assessment window; the MCP layer is complete on our side.
+
+---
+
+### Task 2 — Three Builds on SuperDocs
+
+**Build A: Aviation Revision Bars & Effective Pages Generator**
+Serves technical publications specialists who issue controlled revisions to Flight Crew Operating Manuals. The app compares two document revisions, auto-generates 3px left-margin change bars aligned to every modified paragraph, builds a Revision Record table, compiles a List of Effective Pages, writes a Highlights of Change summary, and stamps every page with `Revision XXXX — YYYY-MM-DD` headers and centered `Page X of Y` footers before exporting a controlled PDF. Every bar aligns to a real change and nothing else; the LEP matches the exported pagination.
+*Key technical work:* Built a paragraph-level AST differ to isolate real content changes from whitespace noise, then used PyMuPDF's redaction layer to surgically stamp revision metadata onto existing PDFs without re-rendering them.
+
+**Build B: FinOps Build-vs-Buy / ROI Calculator**
+Serves technology leadership evaluating custom AI document pipelines versus SuperDocs. Live reactive TCO calculator: change any input (document volume, engineering hours, loaded cost rate) and the build-vs-buy comparison recomputes immediately. Download button exports a branded PDF via the SuperDocs export API whose numbers exactly match what is on screen at the moment of generation — not a screenshot, a real exported document.
+*Key technical work:* Solved the "numbers must match" problem by computing the full TCO model server-side at export time using the same formula functions as the React UI, so the PDF figures are generated from identical inputs rather than scraped from the screen.
+
+**Build C: Study-Guide & Equation Synthesizer (Open Task List, Band S2)**
+Serves STEM students and EdTech tutors. Paste raw lecture notes and shorthand formulas; the system synthesizes a 4-tier structured study guide (formula reference table, Cornell conceptual breakdown, Feynman intuitive explanation, active recall quiz) and exports a publication-grade vector PDF with correct Unicode mathematical symbols (∇, ρ, ε₀, ∂) rendered via PyMuPDF's `insert_htmlbox` engine with KaTeX in the browser preview.
+*Key technical work:* Discovered that PyMuPDF's default Helvetica font silently drops Greek/math Unicode glyphs. Solved this by switching to the `insert_htmlbox` API which routes through system fonts with proper Unicode coverage, guaranteeing ∇ renders as ∇ and not as a blank box or `?`.
+
+**Measurable results across all three builds:**
+- 50 / 50 unified sidecar tests pass in 2.63 seconds.
+- Zero TypeScript errors across all three React frontends (`tsc && vite build` clean).
+- All builds run fully offline without live API keys.
+
+**Honest limitations:**
+- Build B's PDF export calls the SuperDocs Cloud export API. If the API key is absent the PDF falls back to a local PyMuPDF-generated document; the numbers are correct but the branded styling is absent.
+- Build C's AI chat refinement uses a deterministic patch engine offline (appends a revision note section). Live LLM-powered surgical section editing requires a connected SuperDocs API key.
+
+---
+
+## Architecture Diagram
+
 ```
+┌─────────────────────────────────────────────────────────────┐
+│                    CLIENT LAYER                              │
+│  Build A UI (5173) │ Build B UI (5174) │ Build C UI (5175)  │
+│                DocTask Review UI (3000)                      │
+└────────────────────────────┬────────────────────────────────┘
+                             │ HTTP
+┌────────────────────────────▼────────────────────────────────┐
+│              MODULAR SIDECAR HUB  (Port 8000)               │
+│  build_a/router.py          build_b/router.py               │
+│  /api/step/*  /api/export   /api/export-report              │
+│               build_c/router.py                             │
+│               /api/study-guide/generate|chat|export         │
+└──────┬─────────────────┬──────────────────┬────────────────┘
+       │                 │                  │
+┌──────▼──────┐  ┌───────▼───────┐  ┌──────▼──────────────┐
+│  Paragraph  │  │   PyMuPDF     │  │  SuperDocs Cloud API │
+│  AST Differ │  │  Stamping &   │  │  Chat / Export /     │
+│  & Redline  │  │  HTMLBox PDF  │  │  Parts endpoints     │
+│  Engine     │  │  Engine       │  │                      │
+└─────────────┘  └───────────────┘  └──────────────────────┘
 
----
-
-## 3. Key Trade-offs & Defended Design Calls
-
-1. **Modular APIRouter Hub vs Monolithic Server**:
-   * *Decision:* Decoupled each build into dedicated `APIRouter` modules (`build_a/router.py`, `build_b/router.py`, `build_c/router.py`) orchestrated by a lightweight ~70-line `server.py`.
-   * *Trade-off:* Adds a router file per build, but ensures 100% route isolation, zero name collisions, and independent testability.
-
-2. **Vector Layout Engine (`insert_htmlbox`) for True Unicode Math**:
-   * *Decision:* Upgraded Build C's PDF exporter to use PyMuPDF's `insert_htmlbox` engine instead of standard text insertion or relying on the cloud API fallback.
-   * *Trade-off:* Requires mapping system fonts, but absolutely guarantees that complex Greek math characters (∇, ρ, ε, ∂) render flawlessly as vector text alongside robust bounding boxes for Markdown tables, without missing glyph errors (`?`).
-
-3. **Deterministic Fallbacks & Silent Failure Prevention**:
-   * *Decision:* Implemented strict response validation on the `api.superdocs.app/v1/chat` refinement endpoint.
-   * *Trade-off:* Adds response overhead, but gracefully catches invalid keys/timeouts and instantly triggers the local deterministic patching engine, ensuring the user's UI always reliably updates.
-
-4. **Atomic PDF Stamping & Margin Redaction Guarantee**:
-   * *Decision:* Layered SuperDocs Cloud PDF export with PyMuPDF dynamic footer centering and bottom-margin artifact redaction.
-   * *Trade-off:* Incorporates a secondary PyMuPDF processing pass, but guarantees that physical page numbers (`Page 1 of 2`) are mathematically centered on every page margin and stray prompt artifacts (`Page of`) are eliminated.
-
----
-
-## 4. Verification & Measurable Outcomes
-
-- **Automated Test Coverage**:
-  - Task 1 Backend (`doctask`): **116/116 unit & integration tests passing in 34.35s** (100% pass rate).
-  - Sidecar Unified Test Suite: **50/50 tests passing in 2.63s** (41 Build A + 5 Router Integration + 4 Build C).
-- **Zero-Key Execution**: All test suites and local demos run offline without live API keys or paid credits.
-- **Frontend Quality**: Zero TypeScript errors (`tsc && vite build`) across all 4 web interfaces.
-
+┌─────────────────────────────────────────────────────────────┐
+│               TASK 1: DOCTASK ENGINE                        │
+│                                                             │
+│  Document Inbox (watched directory)                         │
+│       │                                                     │
+│       ▼                                                     │
+│  LangGraph Pipeline                                         │
+│  Ingest → Extract Facts → Detect Conflicts                  │
+│       → Apply Governance Rules → Human Gate                 │
+│       → Append-Only Ledger                                  │
+│                                                             │
+│  Storage: PostgreSQL 16 + pgvector                          │
+│  (embeddings + relational ledger in one instance)           │
+│                                                             │
+│  FastAPI (Port 8000) + MCP Server (SSE, Port 9000)          │
+│  React Review UI (Port 3000)                                │
+└─────────────────────────────────────────────────────────────┘
+```

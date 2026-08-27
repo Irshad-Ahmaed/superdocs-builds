@@ -46,9 +46,9 @@ npm run dev  # http://localhost:5175
 ## Running Tests
 
 ```bash
-# Run all 45+ tests across all builds
-pytest build-a/sidecar/tests -v
-pytest build-c/sidecar/tests -v
+# Run all 50 tests across all builds (41 Build A + 5 Router Integration + 4 Build C)
+pytest build-a/sidecar/tests -v   # 41 Build A tests
+pytest build-c/sidecar/tests -v   # 4 Build C tests
 ```
 
 ## SuperDocs Features Used
