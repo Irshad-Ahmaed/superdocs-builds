@@ -153,6 +153,7 @@ async def step_load_edit(req: LoadEditRequest) -> Dict[str, Any]:
                             cloud_html = cloud_html.replace(old_h, clean_new).replace(clean_old, clean_new)
                         return {
                             "success": True,
+                            "source": "superdocs_cloud_api",
                             "ops_used": 1,
                             "pre_edit_html": req.document_html,
                             "post_edit_html": cloud_html,
@@ -167,6 +168,7 @@ async def step_load_edit(req: LoadEditRequest) -> Dict[str, Any]:
 
     return {
         "success": True,
+        "source": "local_ast_fallback",
         "ops_used": 1,
         "pre_edit_html": req.document_html,
         "post_edit_html": post_html,
@@ -410,6 +412,9 @@ async def export_pdf(req: ExportRequest) -> Dict[str, Any]:
                     download_url = f"http://localhost:8000/api/download/{pdf_path.name}"
                     return {
                         "success": True,
+                        "source": "superdocs_cloud_api",
+                        "cloud_status": cloud_res.status_code,
+                        "pdf_bytes_length": len(cloud_res.content),
                         "pdf_path": str(pdf_path),
                         "download_url": download_url,
                         "pdf_base64": pdf_b64,
@@ -474,6 +479,7 @@ async def export_pdf(req: ExportRequest) -> Dict[str, Any]:
 
     return {
         "success": True,
+        "source": "local_pymupdf_fallback",
         "pdf_path": str(pdf_path),
         "download_url": download_url,
         "pdf_base64": pdf_b64,
